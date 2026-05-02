@@ -1,7 +1,8 @@
 ```markdown
 # ViGo
 
-**The AI Scripting Language — Write less, do more.**
+**The AI Scripting Language.**
+**The first test version, the latest release**
 
 ViGo is a lightweight, embeddable scripting language purpose-built for AI workflows.
 Concise syntax, native pipe operator, optional chaining, null coalescing, and a

@@ -30,6 +30,39 @@ class Parser:
         self.lexer.pos, self.lexer.line, self.lexer.col, self.lexer.current_char = state[:4]
         self.current_token = state[4]
 
+    # ── Block parsing helper ──
+    def _parse_block(self, terminators=None):
+        """Parse statements until a terminator token or Fin at depth 0.
+        Returns (body, fin_consumed, stopped_on).
+        terminators: set of token types that stop the block (e.g. {CATCH, EIF, EL}).
+        """
+        if terminators is None:
+            terminators = set()
+        body = []
+        depth = 1
+        fin_consumed = False
+        stopped_on = None
+        while depth > 0:
+            t = self.current_token
+            if t.type == TokenType.TS:
+                depth += 1
+                self.eat(TokenType.TS)
+            elif t.type in terminators and depth == 1:
+                stopped_on = t.type
+                break
+            elif t.type == TokenType.FIN:
+                depth -= 1
+                if depth == 0:
+                    self.eat(TokenType.FIN)
+                    fin_consumed = True
+                    break
+                self.eat(TokenType.FIN)
+            elif t.type == TokenType.EOF:
+                self.error(f"Missing Fin (unclosed block)")
+            else:
+                body.append(self.parse_statement())
+        return body, fin_consumed, stopped_on
+
     def parse_program(self):
         stmts = []
         while self.current_token.type != TokenType.EOF:
@@ -237,51 +270,22 @@ class Parser:
         if t.type == TokenType.MINUS: self.eat(TokenType.MINUS); return -self.eval_literal()
         self.error("Expected literal")
 
+    # ── try / catch ──
     def parse_try_stmt(self):
         self.eat(TokenType.TRY)
         self.eat(TokenType.TS)
-        try_body = []
-        depth = 1
-        while depth > 0:
-            if self.current_token.type == TokenType.TS:
-                depth += 1
-                self.eat(TokenType.TS)
-            elif self.current_token.type == TokenType.CATCH:
-                break
-            elif self.current_token.type == TokenType.FIN:
-                depth -= 1
-                self.eat(TokenType.FIN)
-                break
-            elif self.current_token.type == TokenType.EOF:
-                self.error("try missing catch or Fin")
-            else:
-                try_body.append(self.parse_statement())
+        try_body, fin_consumed, stopped = self._parse_block(terminators={TokenType.CATCH})
         catch_var = None
         catch_body = []
-        if self.match(TokenType.CATCH):
+        if stopped == TokenType.CATCH:
+            self.eat(TokenType.CATCH)
             if self.current_token.type == TokenType.IDENTIFIER:
                 catch_var = self.current_token.value
                 self.eat(TokenType.IDENTIFIER)
             self.eat(TokenType.TS)
-            depth = 1
-            fin_consumed = False
-            while depth > 0:
-                if self.current_token.type == TokenType.TS:
-                    depth += 1
-                    self.eat(TokenType.TS)
-                elif self.current_token.type == TokenType.FIN:
-                    depth -= 1
-                    if depth == 0:
-                        self.eat(TokenType.FIN)
-                        fin_consumed = True
-                        break
-                    self.eat(TokenType.FIN)
-                elif self.current_token.type == TokenType.EOF:
-                    self.error("catch missing Fin")
-                else:
-                    catch_body.append(self.parse_statement())
-            if not fin_consumed:
-                self.eat(TokenType.FIN)
+            catch_body, _, _ = self._parse_block()
+        elif not fin_consumed:
+            self.eat(TokenType.FIN)
         self.optional_semicolon()
         return TryStmt(try_body, catch_var, catch_body)
 
@@ -289,6 +293,7 @@ class Parser:
         self.eat(TokenType.THROW); val = self.parse_expression()
         self.optional_semicolon(); return ThrowStmt(val)
 
+    # ── switch ──
     def parse_switch_stmt(self):
         self.eat(TokenType.SWITCH)
         expr = self.parse_expression()
@@ -298,19 +303,20 @@ class Parser:
         depth = 1
         fin_consumed = False
         while depth > 0:
-            if self.current_token.type == TokenType.TS:
+            t = self.current_token
+            if t.type == TokenType.TS:
                 depth += 1
                 self.eat(TokenType.TS)
-            elif self.current_token.type == TokenType.FIN:
+            elif t.type == TokenType.FIN:
                 depth -= 1
                 if depth == 0:
                     self.eat(TokenType.FIN)
                     fin_consumed = True
                     break
                 self.eat(TokenType.FIN)
-            elif self.current_token.type == TokenType.EOF:
+            elif t.type == TokenType.EOF:
                 self.error("switch missing Fin")
-            elif self.current_token.type == TokenType.CASE:
+            elif t.type == TokenType.CASE:
                 self.eat(TokenType.CASE)
                 if self.current_token.type == TokenType.NUMBER:
                     start = self.current_token.value
@@ -330,9 +336,18 @@ class Parser:
                 self.eat(TokenType.TS)
                 case_body = []
                 while self.current_token.type not in (TokenType.CASE, TokenType.DEFAULT, TokenType.FIN):
+                    if self.current_token.type == TokenType.TS:
+                        depth += 1
+                        self.eat(TokenType.TS)
+                        continue
+                    if self.current_token.type == TokenType.FIN:
+                        depth -= 1
+                        if depth == 0: break
+                        self.eat(TokenType.FIN)
+                        continue
                     case_body.append(self.parse_statement())
                 cases.append((case_val, case_body))
-            elif self.current_token.type == TokenType.DEFAULT:
+            elif t.type == TokenType.DEFAULT:
                 self.eat(TokenType.DEFAULT)
                 self.eat(TokenType.TS)
                 while self.current_token.type != TokenType.FIN:
@@ -344,106 +359,52 @@ class Parser:
         self.optional_semicolon()
         return SwitchStmt(expr, cases, default_body)
 
+    # ── if / eif / el ──
     def parse_if_stmt(self):
-        self.eat(TokenType.IF); cond = self.parse_expression(); self.eat(TokenType.TS)
-        then_body = []; depth = 1
-        fin_consumed = False
-        while depth > 0:
-            if self.current_token.type == TokenType.TS:
-                depth += 1; self.eat(TokenType.TS)
-            elif self.current_token.type in (TokenType.EIF, TokenType.EL):
-                break
-            elif self.current_token.type == TokenType.FIN:
-                depth -= 1
-                if depth == 0:
-                    self.eat(TokenType.FIN)
-                    fin_consumed = True
-                    break
-                self.eat(TokenType.FIN)
-            elif self.current_token.type == TokenType.EOF:
-                self.error("if missing Fin")
-            else:
-                then_body.append(self.parse_statement())
-        
+        self.eat(TokenType.IF)
+        cond = self.parse_expression()
+        self.eat(TokenType.TS)
+        then_body, fin_consumed, stopped = self._parse_block(terminators={TokenType.EIF, TokenType.EL})
         else_body = []
-        while self.current_token.type == TokenType.EIF:
-            self.eat(TokenType.EIF); ec = self.parse_expression(); self.eat(TokenType.TS)
-            eb = []; depth = 1
-            while depth > 0:
-                if self.current_token.type == TokenType.TS:
-                    depth += 1; self.eat(TokenType.TS)
-                elif self.current_token.type in (TokenType.EIF, TokenType.EL):
-                    break
-                elif self.current_token.type == TokenType.FIN:
-                    depth -= 1
-                    if depth == 0: self.eat(TokenType.FIN); fin_consumed = True; break
-                    self.eat(TokenType.FIN)
-                elif self.current_token.type == TokenType.EOF:
-                    self.error("eif missing Fin")
-                else:
-                    eb.append(self.parse_statement())
+        while stopped == TokenType.EIF:
+            self.eat(TokenType.EIF)
+            ec = self.parse_expression()
+            self.eat(TokenType.TS)
+            eb, eb_fin, stopped = self._parse_block(terminators={TokenType.EIF, TokenType.EL})
             else_body.append((ec, eb))
-        
-        if self.match(TokenType.EL):
-            self.eat(TokenType.TS); elb = []; depth = 1
-            while depth > 0:
-                if self.current_token.type == TokenType.TS:
-                    depth += 1; self.eat(TokenType.TS)
-                elif self.current_token.type == TokenType.FIN:
-                    depth -= 1
-                    if depth == 0: self.eat(TokenType.FIN); fin_consumed = True; break
-                    self.eat(TokenType.FIN)
-                elif self.current_token.type == TokenType.EOF:
-                    self.error("el missing Fin")
-                else:
-                    elb.append(self.parse_statement())
+            fin_consumed = eb_fin or stopped is not None
+        if stopped == TokenType.EL:
+            self.eat(TokenType.EL)
+            self.eat(TokenType.TS)
+            elb, _, _ = self._parse_block()
             else_body.append((None, elb))
         elif not fin_consumed:
             self.eat(TokenType.FIN)
-        
-        self.optional_semicolon(); return IfStmt(cond, then_body, else_body)
+        self.optional_semicolon()
+        return IfStmt(cond, then_body, else_body)
 
+    # ── skip (unless) ──
     def parse_skip_stmt(self):
         self.eat(TokenType.SKIP)
         cond = self.parse_expression()
         self.eat(TokenType.TS)
-        body = []
-        depth = 1
-        fin_consumed = False
-        while depth > 0:
-            if self.current_token.type == TokenType.TS:
-                depth += 1
-                self.eat(TokenType.TS)
-            elif self.current_token.type == TokenType.FIN:
-                depth -= 1
-                if depth == 0:
-                    self.eat(TokenType.FIN)
-                    fin_consumed = True
-                    break
-                self.eat(TokenType.FIN)
-            elif self.current_token.type == TokenType.EOF:
-                self.error("skip missing Fin")
-            else:
-                body.append(self.parse_statement())
+        body, fin_consumed, _ = self._parse_block()
         if not fin_consumed:
             self.eat(TokenType.FIN)
         self.optional_semicolon()
         return SkipStmt(cond, body)
 
+    # ── go (do-while) ──
     def parse_do_while_stmt(self):
-        self.eat(TokenType.GO); self.eat(TokenType.TS)
-        body = []; depth = 1
-        while depth > 0:
-            if self.current_token.type == TokenType.TS: depth += 1; self.eat(TokenType.TS)
-            elif self.current_token.type == TokenType.FIN:
-                depth -= 1
-                if depth == 0: self.eat(TokenType.FIN); break
-                self.eat(TokenType.FIN)
-            elif self.current_token.type == TokenType.EOF: self.error("go Missing Fin")
-            else: body.append(self.parse_statement())
+        self.eat(TokenType.GO)
+        self.eat(TokenType.TS)
+        body, fin_consumed, _ = self._parse_block()
+        if not fin_consumed:
+            self.eat(TokenType.FIN)
         self.eat(TokenType.LOOP); cond = self.parse_expression()
         self.optional_semicolon(); return DoWhileStmt(body, cond)
 
+    # ── for-in ──
     def parse_for_in_stmt(self):
         self.eat(TokenType.FOR)
         vn = self.current_token.value
@@ -451,65 +412,29 @@ class Parser:
         self.eat(TokenType.IN)
         it = self.parse_expression()
         self.eat(TokenType.TS)
-        body = []
-        depth = 1
-        fin_consumed = False
-        while depth > 0:
-            if self.current_token.type == TokenType.TS:
-                depth += 1
-                self.eat(TokenType.TS)
-            elif self.current_token.type == TokenType.FIN:
-                depth -= 1
-                if depth == 0:
-                    self.eat(TokenType.FIN)
-                    fin_consumed = True
-                    break
-                self.eat(TokenType.FIN)
-            elif self.current_token.type == TokenType.EOF:
-                self.error("for missing Fin")
-            else:
-                body.append(self.parse_statement())
+        body, fin_consumed, _ = self._parse_block()
         if not fin_consumed:
             self.eat(TokenType.FIN)
         self.optional_semicolon()
         return ForInStmt(vn, it, body)
 
+    # ── loop (while) ──
     def parse_loop_stmt(self):
         self.eat(TokenType.LOOP); cond = self.parse_expression(); self.eat(TokenType.TS)
-        body = []; depth = 1
-        fin_consumed = False
-        while depth > 0:
-            if self.current_token.type == TokenType.TS:
-                depth += 1; self.eat(TokenType.TS)
-            elif self.current_token.type == TokenType.FIN:
-                depth -= 1
-                if depth == 0:
-                    self.eat(TokenType.FIN)
-                    fin_consumed = True
-                    break
-                self.eat(TokenType.FIN)
-            elif self.current_token.type == TokenType.EOF:
-                self.error("loop missing Fin")
-            else:
-                body.append(self.parse_statement())
+        body, fin_consumed, _ = self._parse_block()
         if not fin_consumed:
             self.eat(TokenType.FIN)
         self.optional_semicolon(); return LoopStmt(cond, body)
 
+    # ── function ──
     def parse_func_def(self):
         self.eat(TokenType.FUN); self.eat(TokenType.AS)
         name = self.current_token.value; self.eat(TokenType.IDENTIFIER)
         self.eat(TokenType.LPAREN); params, defaults, rest_param = self.parse_func_params()
         self.eat(TokenType.RPAREN); self.eat(TokenType.COLON)
-        body = []; depth = 1
-        while depth > 0:
-            if self.current_token.type == TokenType.TS: depth += 1; self.eat(TokenType.TS)
-            elif self.current_token.type == TokenType.FIN:
-                depth -= 1
-                if depth == 0: self.eat(TokenType.FIN); break
-                self.eat(TokenType.FIN)
-            elif self.current_token.type == TokenType.EOF: self.error("FunctionMissing Fin")
-            else: body.append(self.parse_statement())
+        body, fin_consumed, _ = self._parse_block()
+        if not fin_consumed:
+            self.eat(TokenType.FIN)
         self.optional_semicolon(); return FuncDef(name, params, defaults, rest_param, body)
 
     def parse_func_params(self):
@@ -674,7 +599,8 @@ class Parser:
         if t.type == TokenType.LBRACE: return self.parse_dict_or_set()
         if t.type == TokenType.LPAREN: return self.parse_tuple_or_expr()
         if t.type == TokenType.FUN: return self.parse_lambda()
-        self.error(f"Cannot parse: {t}")
+        col = t.column
+        self.error(f"Cannot parse: {t.value} (token type: {t.type.name})")
 
     def parse_lambda(self):
         self.eat(TokenType.FUN)
@@ -685,15 +611,9 @@ class Parser:
             params.append(self.current_token.value); self.eat(TokenType.IDENTIFIER)
             while self.match(TokenType.COMMA): params.append(self.current_token.value); self.eat(TokenType.IDENTIFIER)
         self.eat(TokenType.COLON)
-        body = []; depth = 1
-        while depth > 0:
-            if self.current_token.type == TokenType.TS: depth += 1; self.eat(TokenType.TS)
-            elif self.current_token.type == TokenType.FIN:
-                depth -= 1
-                if depth == 0: self.eat(TokenType.FIN); break
-                self.eat(TokenType.FIN)
-            elif self.current_token.type == TokenType.EOF: self.error("lambda Missing Fin")
-            else: body.append(self.parse_statement())
+        body, fin_consumed, _ = self._parse_block()
+        if not fin_consumed:
+            self.eat(TokenType.FIN)
         self.optional_semicolon(); return LambdaExpr(params, body)
 
     def parse_new_expr(self):

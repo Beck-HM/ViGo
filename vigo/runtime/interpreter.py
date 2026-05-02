@@ -42,6 +42,8 @@ class Interpreter:
         try:
             if isinstance(node, Program): return self.eval_block(node.statements, env)
             elif isinstance(node, VarDecl):
+                if node.name in self.constants:
+                    raise ViGoError(f"Cannot modify constant '{node.name}'")
                 val = self.eval(node.value, env)
                 if node.is_const: self.constants.add(node.name)
                 env.define(node.name, val); return val
@@ -65,7 +67,7 @@ class Interpreter:
             elif isinstance(node, ContinueStmt): raise ContinueException()
             elif isinstance(node, SureStmt):
                 if not self.is_truthy(self.eval(node.condition, env)):
-                    raise ViGoError(f"Assertion failed: {node.message or 'Conditionnot satisfied'}")
+                    raise ViGoError(f"Assertion failed: {node.message or 'Condition not satisfied'}")
                 return True
             elif isinstance(node, StaticMethodDef):
                 func = ViGoFunction(node.func_def.name, node.func_def.params,
@@ -152,21 +154,29 @@ class Interpreter:
         args = [self.eval(a, env) for a in node.args]
         func = None; func_name = '<unknown>'; this_obj = None
         if isinstance(node.name, DotAccess):
-            obj = self.eval(node.name.object, env); mn = node.name.attr; func_name = f"?.{mn}"
+            obj = self.eval(node.name.object, env); mn = node.name.attr; func_name = f".{mn}"
             if isinstance(obj, ViGoInstance):
                 func = obj.env.lookup(mn) if mn in obj.env.variables else obj.cls.closure.lookup(mn)
                 this_obj = obj
             elif isinstance(obj, ViGoClass):
                 func = obj.closure.lookup(mn)
-            elif isinstance(obj, dict) and mn in obj: func = obj[mn]
+            elif isinstance(obj, dict):
+                if mn in obj:
+                    func = obj[mn]
+                else:
+                    func = self._dot(DotAccess(Literal(obj), mn), env)
+            else:
+                func = self._dot(DotAccess(Literal(obj), mn), env)
         elif isinstance(node.name, Variable):
             func = env.lookup(node.name.name); func_name = node.name.name
-        else: func = self.eval(node.name, env)
+        else:
+            func = self.eval(node.name, env)
         return self._call(func, args, env, func_name, this_obj)
 
     def _call(self, func, args, env, func_name, this_obj=None):
         if self.call_depth > self.MAX_CALL_DEPTH: raise ViGoError("Maximum call depth exceeded")
-        if isinstance(func, BuiltinFunction): return func.func(*args)
+        if isinstance(func, BuiltinFunction):
+            return func.func(*args)
         elif isinstance(func, (ViGoFunction, LambdaFunction)):
             final_args = list(args); expected = len(func.params)
             while len(final_args) < expected:
@@ -199,9 +209,14 @@ class Interpreter:
                         else: break
                     for p, a in zip(init_f.params, fa[:exp]): ce.define(p, a)
                     self.call_depth += 1; self.call_trace.append(f"{func.name}.init()")
-                    try: self.eval_block(init_f.body, ce)
-                    except ReturnException: pass
+                    try:
+                        self.eval_block(init_f.body, ce)
+                    except ReturnException:
+                        pass
                     finally:
+                        for k, v in ce.variables.items():
+                            if k not in inst.env.variables and k != 'this':
+                                inst.env.define(k, v)
                         self.call_depth -= 1
                         if self.call_trace: self.call_trace.pop()
             return inst
@@ -231,6 +246,8 @@ class Interpreter:
 
     def _assign(self, node, env):
         if isinstance(node.target, Variable):
+            if node.target.name in self.constants:
+                raise ViGoError(f"Cannot modify constant '{node.target.name}'")
             cur = env.lookup(node.target.name)
             nv = self._apply_assign_op(cur, self.eval(node.value, env), node.op)
             env.assign(node.target.name, nv); return nv
@@ -244,7 +261,7 @@ class Interpreter:
                 obj.env.lookup(target.attr) if isinstance(obj, ViGoInstance) and target.attr in obj.env.variables else None)
             nv = self._apply_assign_op(cur if cur is not None else 0 if op != '=' else None, value, op)
             if isinstance(obj, dict): obj[target.attr] = nv
-            elif isinstance(obj, ViGoInstance): obj.env.assign(target.attr, nv)
+            elif isinstance(obj, ViGoInstance): obj.env.variables[target.attr] = nv
             return nv
         elif isinstance(target, IndexAccess):
             obj = self.eval(target.object, env); idx = self.eval(target.index, env)
@@ -304,7 +321,7 @@ class Interpreter:
     def _do_while(self, node, env):
         result = None
         while True:
-            try: result = self.eval_block(node.body, Environment(env))
+            try: result = self.eval_block(node.body, env)
             except BreakException: break
             except ContinueException: continue
             if not self.is_truthy(self.eval(node.condition, env)): break
@@ -320,11 +337,17 @@ class Interpreter:
         return result
 
     def _chained_compare(self, node, env):
-        ops = {'<': lambda a, b: a < b, '<=': lambda a, b: a <= b, '>': lambda a, b: a > b,
-               '>=': lambda a, b: a >= b, '==': lambda a, b: a == b, '!=': lambda a, b: a != b}
         operands = [self.eval(o, env) for o in node.operands]
+        operands = [0 if o is None else o for o in operands]
         for i, op in enumerate(node.ops):
-            if not ops[op](operands[i], operands[i+1]): return False
+            left = operands[i]
+            right = operands[i+1]
+            if op == '<' and not (left < right): return False
+            elif op == '<=' and not (left <= right): return False
+            elif op == '>' and not (left > right): return False
+            elif op == '>=' and not (left >= right): return False
+            elif op == '==' and not (left == right): return False
+            elif op == '!=' and not (left != right): return False
         return True
 
     def _in_expr(self, node, env):
@@ -334,6 +357,16 @@ class Interpreter:
 
     def _binary_op(self, node, env):
         left = self.eval(node.left, env); right = self.eval(node.right, env); op = node.op
+        if op in ('==', '!=', '<', '>', '<=', '>='):
+            if op in ('==', '!='):
+                if left is None and right is None:
+                    return op == '=='
+                if left is None or right is None:
+                    return op == '!='
+            if left is None or right is None:
+                return False
+            return {'==': left == right, '!=': left != right, '<': left < right,
+                    '>': left > right, '<=': left <= right, '>=': left >= right}[op]
         if op == '+':
             if isinstance(left, str) or isinstance(right, str): return str(left) + str(right)
             if isinstance(left, list) and isinstance(right, list): return left + right
@@ -364,9 +397,6 @@ class Interpreter:
             return int(left) ^ int(right)
         elif op == '<<': return int(left) << int(right)
         elif op == '>>': return int(left) >> int(right)
-        elif op in ('==', '!=', '<', '>', '<=', '>='):
-            return {'==': left == right, '!=': left != right, '<': left < right,
-                    '>': left > right, '<=': left <= right, '>=': left >= right}[op]
         raise ViGoError(f"Unknown operator: '{op}'")
 
     def _logical_op(self, node, env):
@@ -376,7 +406,7 @@ class Interpreter:
 
     def _unary_op(self, node, env):
         opd = self.eval(node.operand, env)
-        return {'!': not self.is_truthy(opd), '-': -opd, 'not': not self.is_truthy(opd), '~': ~int(opd)}[node.op]
+        return {'!': not self.is_truthy(opd), '-': -opd, 'not': not self.is_truthy(opd), '~': ~int(opd) if opd is not None else 0}[node.op]
 
     def _index(self, node, env):
         obj = self.eval(node.object, env); idx = self.eval(node.index, env)
@@ -386,7 +416,8 @@ class Interpreter:
         elif isinstance(obj, dict): return obj.get(idx, None)
         elif isinstance(obj, ViGoInstance):
             k = str(idx)
-            return obj.env.lookup(k) if k in obj.env.variables else (obj.cls.closure.lookup(k) if k in obj.cls.closure.variables else None)
+            try: return obj.env.lookup(k)
+            except ViGoError: return obj.cls.closure.lookup(k) if k in obj.cls.closure.variables else None
         raise ViGoError("Type does not support index access")
 
     def _slice(self, node, env):
@@ -398,11 +429,31 @@ class Interpreter:
 
     def _dot(self, node, env):
         obj = self.eval(node.object, env); attr = node.attr
-        if isinstance(obj, dict): return obj.get(attr, None)
         if isinstance(obj, ViGoInstance):
-            return obj.env.lookup(attr) if attr in obj.env.variables else (obj.cls.closure.lookup(attr) if attr in obj.cls.closure.variables else None)
+            try: return obj.env.lookup(attr)
+            except ViGoError: return obj.cls.closure.lookup(attr) if attr in obj.cls.closure.variables else None
         if isinstance(obj, ViGoClass): return obj.closure.lookup(attr)
-        raise ViGoError("Dot access only for dict, instance or class")
+        if isinstance(obj, ViGoEnum):
+            for m, v in obj.members:
+                if m == attr:
+                    return v
+            raise ViGoError(f"Enum '{obj.name}' has no member '{attr}'")
+        if isinstance(obj, list):
+            if attr == 'push': return BuiltinFunction(lambda item: obj.append(item) or obj, 'push')
+            if attr == 'pop': return BuiltinFunction(lambda: obj.pop() if obj else None, 'pop')
+            if attr == 'reverse': return BuiltinFunction(lambda: obj.reverse() or obj, 'reverse')
+        if isinstance(obj, str):
+            if attr == 'upper': return BuiltinFunction(lambda: obj.upper(), 'upper')
+            if attr == 'lower': return BuiltinFunction(lambda: obj.lower(), 'lower')
+            if attr == 'trim': return BuiltinFunction(lambda: obj.strip(), 'trim')
+            if attr == 'split': return BuiltinFunction(lambda delim: obj.split(delim), 'split')
+            if attr == 'join': return BuiltinFunction(lambda items: obj.join(items), 'join')
+            if attr == 'replace': return BuiltinFunction(lambda old, new: obj.replace(old, new), 'replace')
+        if isinstance(obj, dict):
+            if attr == 'keys': return BuiltinFunction(lambda: list(obj.keys()), 'keys')
+            if attr == 'values': return BuiltinFunction(lambda: list(obj.values()), 'values')
+            return obj.get(attr, None)
+        raise ViGoError(f"Dot access '{attr}' not supported on {type(obj).__name__}")
 
     def _interp_str(self, node, env):
         result = ''

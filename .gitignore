@@ -2,4 +2,5 @@ dist/
 __pycache__/
 installer.py
 build_installer.bat
-vigo.ico
+vigo.ico*.gguf 
+*.ico 

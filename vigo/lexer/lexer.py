@@ -76,6 +76,8 @@ class Lexer:
         self.advance()
         result = ''
         while self.current_char is not None and self.current_char != '"':
+            if self.current_char == '\u201c' or self.current_char == '\u201d':
+                self.error("Smart quotes (curly quotes) detected. Use straight quotes (\") instead.")
             if self.current_char == '\\':
                 self.advance()
                 esc = {'n': '\n', 't': '\t', '"': '"', '\\': '\\', '{': '{'}
@@ -92,20 +94,20 @@ class Lexer:
         """Read \"\"\"...\"\"\" Multiline string"""
         start_col = self.col
         start_line = self.line
-        self.advance()  # Skip first "
-        self.advance()  # Skip second "
-        self.advance()  # Skip third "
+        self.advance()
+        self.advance()
+        self.advance()
         result = ''
         while self.current_char is not None:
-            # Check if three consecutive "
             if self.current_char == '"' and self.peek() == '"':
-                # Peek next
                 p2 = self.pos + 2
                 if p2 < len(self.source) and self.source[p2] == '"':
-                    self.advance()  # Skip first "
-                    self.advance()  # Skip second "
-                    self.advance()  # Skip third "
+                    self.advance()
+                    self.advance()
+                    self.advance()
                     break
+            if self.current_char == '\u201c' or self.current_char == '\u201d':
+                self.error("Smart quotes (curly quotes) detected. Use straight quotes (\") instead.")
             if self.current_char == '\\':
                 self.advance()
                 esc = {'n': '\n', 't': '\t', '"': '"', '\\': '\\'}
@@ -121,6 +123,10 @@ class Lexer:
             return Token(TokenType.EOF, None, self.line, self.col)
 
         c = self.current_char
+
+        # Smart quote detection (early check)
+        if c == '\u201c' or c == '\u201d' or c == '\u2018' or c == '\u2019':
+            self.error("Smart/curly quotes detected. Use straight quotes (\") or (') instead.")
 
         # Multiline string """
         if c == '"' and self.peek() == '"':
@@ -237,7 +243,7 @@ class Lexer:
         if c.isdigit(): return self.read_number()
         if c == '"': return self.read_string()
 
-        self.error(f"Unrecognized character '{c}'")
+        self.error(f"Unrecognized character '{c}' (Unicode: U+{ord(c):04X})")
 
     def tokenize(self):
         tokens = []

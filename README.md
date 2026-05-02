@@ -69,7 +69,7 @@ vigo
 ### From Source
 
 ```bash
-git clone https://github.com/vigo-lang/vigo.git
+git clone https://github.com/Beck-HM/ViGo.git
 cd vigo
 python main.py
 ```

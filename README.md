@@ -776,7 +776,7 @@ ViGo/
 
 ## Status
 
-**Version:** v3.6
+**Version:** v3.5
 **Tests:** 55/55 regression tests passing
 **Platform:** Windows (primary), Linux/macOS (via Python source)
 

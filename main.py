@@ -140,31 +140,8 @@ def run_file(filepath, use_bytecode=False):
 
 
 def main():
-    use_bytecode = False
-    args = sys.argv[1:]
-    filepath = None
-
-    for a in args:
-        if a == '--bytecode':
-            use_bytecode = True
-        elif a.startswith('--'):
-            pass
-        else:
-            filepath = a
-
-    if filepath:
-        fp = filepath
-        if not os.path.exists(fp):
-            print(f'💥 File not found: {fp}'); sys.exit(1)
-        print(LOGO)
-        try:
-            result = run_file(fp, use_bytecode)
-            if result is not None: print(f'✨ Return: {result}')
-        except ViGoError as e: print(f'💥 {e}'); sys.exit(1)
-        except Exception as e: print(f'💥 {e}'); sys.exit(1)
-    else:
-        repl = ViGoREPL(use_bytecode=use_bytecode)
-        repl.run()
+    from vigo.cli import main as cli_main
+    cli_main()
 
 
 if __name__ == '__main__':

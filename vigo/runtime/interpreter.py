@@ -46,7 +46,11 @@ class Interpreter:
                     raise ViGoError(f"Cannot modify constant '{node.name}'")
                 val = self.eval(node.value, env)
                 if node.is_const: self.constants.add(node.name)
-                env.define(node.name, val); return val
+                if env.has(node.name) and not node.is_const:
+                    env.assign(node.name, val)
+                else:
+                    env.define(node.name, val)
+                return val
             elif isinstance(node, DestructureDecl): return self._destructure(node, env)
             elif isinstance(node, AssignStmt):
                 if isinstance(node.target, Variable) and node.target.name in self.constants:
@@ -338,10 +342,13 @@ class Interpreter:
 
     def _chained_compare(self, node, env):
         operands = [self.eval(o, env) for o in node.operands]
-        operands = [0 if o is None else o for o in operands]
         for i, op in enumerate(node.ops):
             left = operands[i]
             right = operands[i+1]
+            if left is None or right is None:
+                if op == '==': return left is None and right is None
+                if op == '!=': return left is not right
+                return False
             if op == '<' and not (left < right): return False
             elif op == '<=' and not (left <= right): return False
             elif op == '>' and not (left > right): return False

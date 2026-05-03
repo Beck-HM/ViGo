@@ -46,6 +46,28 @@ result = agent |> ai_agent_run("Calculate 2^10 and tell me the result")
 print(result)
 ```
 
+## Changelog
+
+### v3.5 (Stable Beta) — 2026-05-03
+
+**Bug Fixes:**
+- Fixed `switch` single-line case + multi-line default parsing
+- Fixed string interpolation formatting (`{var:.2f}` now works correctly)
+- Fixed `null` comparison in chained expressions (`null == null`, `null < 5`, etc.)
+- Fixed closure variable assignment (functions can now modify outer variables correctly)
+- Registered `sorted()` as a built-in function
+
+**New Features:**
+- Package Manager: `vigo install`, `vigo uninstall`, `vigo list`, `vigo publish`, `vigo build`
+- Package Registry: `Beck-HM/ViGo-Registry`
+- CLI unified under `vigo/cli.py` with subcommand routing
+
+**Language Enhancements:**
+- Built-in method support: `list.push()`, `str.upper()`, `dict.keys()`, `str.split()`, etc.
+- Smart quote detection with friendly error messages (shows Unicode codepoint)
+- Unified block parser (`_parse_block`) for all control flow structures
+- `const` variables now properly protected from reassignment
+
 ---
 
 ## Installation

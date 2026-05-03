@@ -335,27 +335,46 @@ class Parser:
                     case_val = self.eval_literal()
                 self.eat(TokenType.TS)
                 case_body = []
-                while self.current_token.type not in (TokenType.CASE, TokenType.DEFAULT, TokenType.FIN):
-                    if self.current_token.type == TokenType.TS:
-                        depth += 1
+                case_depth = 1
+                while True:
+                    t2 = self.current_token
+                    if t2.type == TokenType.TS:
+                        case_depth += 1
                         self.eat(TokenType.TS)
                         continue
-                    if self.current_token.type == TokenType.FIN:
-                        depth -= 1
-                        if depth == 0: break
+                    if t2.type == TokenType.FIN:
+                        case_depth -= 1
+                        if case_depth == 0:
+                            self.eat(TokenType.FIN)
+                            break
                         self.eat(TokenType.FIN)
                         continue
+                    if t2.type in (TokenType.CASE, TokenType.DEFAULT):
+                        break
+                    if t2.type == TokenType.EOF:
+                        self.error("switch case missing Fin")
                     case_body.append(self.parse_statement())
                 cases.append((case_val, case_body))
             elif t.type == TokenType.DEFAULT:
                 self.eat(TokenType.DEFAULT)
                 self.eat(TokenType.TS)
-                while self.current_token.type != TokenType.FIN:
+                default_depth = 1
+                while True:
+                    t3 = self.current_token
+                    if t3.type == TokenType.TS:
+                        default_depth += 1
+                        self.eat(TokenType.TS)
+                        continue
+                    if t3.type == TokenType.FIN:
+                        default_depth -= 1
+                        if default_depth == 0:
+                            self.eat(TokenType.FIN)
+                            break
+                        self.eat(TokenType.FIN)
+                        continue
+                    if t3.type == TokenType.EOF:
+                        self.error("switch default missing Fin")
                     default_body.append(self.parse_statement())
-            else:
-                self.parse_statement()
-        if not fin_consumed:
-            self.eat(TokenType.FIN)
         self.optional_semicolon()
         return SwitchStmt(expr, cases, default_body)
 
@@ -634,10 +653,21 @@ class Parser:
                     if raw[i] == '{': depth += 1
                     elif raw[i] == '}': depth -= 1
                     if depth == 0: break
-                    if depth == 1 and raw[i] == ':': fmt = es; es = ''
-                    else: es += raw[i]
+                    if depth == 1 and raw[i] == ':':
+                        i += 1
+                        while i < len(raw) and depth > 0:
+                            if raw[i] == '{': depth += 1
+                            elif raw[i] == '}': depth -= 1
+                            if depth == 0: break
+                            fmt += raw[i]
+                            i += 1
+                        break
+                    else:
+                        es += raw[i]
                     i += 1
-                sl = Lexer(es); sp = Parser(sl); parts.append((sp.parse_expression(), fmt))
+                if es.strip():
+                    sl = Lexer(es); sp = Parser(sl)
+                    parts.append((sp.parse_expression(), None if fmt == '' else fmt))
                 i += 1
             elif raw[i] == '}' and i + 1 < len(raw) and raw[i + 1] == '}': cur += '}'; i += 2
             else: cur += raw[i]; i += 1

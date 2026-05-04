@@ -48,6 +48,10 @@ print(result)
 
 ## Changelog
 
+### v3.6 (Stable Beta) — 2026-05-04
+
+See [RM3.md](RM3.md) for the full v3.6 release notes.
+
 ### v3.5 (Stable Beta) — 2026-05-03
 
 **Bug Fixes:**
@@ -799,7 +803,7 @@ ViGo/
 
 ## Status
 
-**Version:** v3.5
+**Version:** v3.6
 **Tests:** 55/55 regression tests passing
 **Platform:** Windows (primary), Linux/macOS (via Python source)
 
@@ -821,5 +825,6 @@ ViGo is under active development. Contributions are welcome:
 2. Create a feature branch
 3. Add passing tests for any changes
 4. Submit a pull request
-
 ```
+
+---

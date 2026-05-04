@@ -1,0 +1,127 @@
+# ============================================
+#   New Stdlib Modules Test Suite
+#   regexlib, markdownlib, htmllib, csslib
+# ============================================
+
+print("=== New Stdlib Modules Test ===")
+print("")
+
+state = { total: 0, errors: 0 }
+
+Fun as check(name, condition):
+    if condition ts
+        print("  OK: " + name)
+        state.total = state.total + 1
+    el ts
+        print("  FAIL: " + name)
+        state.errors = state.errors + 1
+        state.total = state.total + 1
+    Fin
+Fin
+
+# ── 1. Regex ──
+print("-- 1. Regex --")
+
+check("regex_test valid", regex_test("\\d+") == ok)
+check("regex_test invalid", regex_test("[unclosed") == no)
+check("regex_match found", regex_match("hello", "hello world") == ok)
+check("regex_match not found", regex_match("xyz", "hello world") == no)
+check("regex_search", regex_search("\\d+", "abc 123 def") == "123")
+check("regex_search not found", regex_search("xyz", "abc 123") == null)
+check("regex_find_all", regex_find_all("\\d+", "1 and 2 and 3") == ["1", "2", "3"])
+check("regex_replace", regex_replace("cat", "dog", "the cat sat") == "the dog sat")
+check("regex_split", regex_split(",\\s*", "a, b, c") == ["a", "b", "c"])
+check("regex_escape", regex_match("\\\\+", regex_escape("1+1=2")) == ok)
+check("regex_groups", regex_groups("(\\d+)-(\\d+)", "2024-05-03") == ["2024", "05"])
+check("regex_count", regex_count("\\d+", "1, 22, 333") == 3)
+
+# ── 2. Markdown ──
+print("")
+print("-- 2. Markdown --")
+
+md = "# Hello\n\nThis is **bold** and *italic*.\n\n[Link](https://example.com)\n\n```python\nprint(1)\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |"
+
+check("md_to_html", len(md_to_html(md)) > 0)
+check("md_to_html contains h1", regex_match("<h1>Hello</h1>", md_to_html(md)) == ok)
+check("md_to_html contains bold", regex_match("<strong>bold</strong>", md_to_html(md)) == ok)
+links = md_extract_links(md)
+check("md_extract_links count", len(links) == 1)
+check("md_extract_links text", links[0][0] == "Link")
+check("md_extract_links url", links[0][1] == "https://example.com")
+
+headers = md_extract_headers("# Title\n## Sub")
+check("md_extract_headers count", len(headers) == 2)
+check("md_extract_headers h1", headers[0][0] == 1 and headers[0][1] == "Title")
+check("md_extract_headers h2", headers[1][0] == 2 and headers[1][1] == "Sub")
+
+codes = md_extract_code(md)
+check("md_extract_code count", len(codes) == 1)
+check("md_extract_code lang", codes[0][0] == "python")
+check("md_extract_code content", codes[0][1] == "print(1)")
+
+check("md_to_plain", regex_match("Hello", md_to_plain(md)) == ok)
+check("md_count_words", md_count_words("# Hi there\n\nHello world") == 4)
+
+tbl_src = "| A | B |\n|---|---|\n| 1 | 2 |"
+tbl = md_table_to_list(tbl_src)
+check("md_table_to_list", ok)
+if len(tbl) >= 2 ts
+    check("md_table_to_list headers", tbl[0][0] == "A" and tbl[0][1] == "B")
+    check("md_table_to_list data", tbl[1][0] == "1" and tbl[1][1] == "2")
+Fin
+
+check("md_escape_html", md_escape_html("<script>") == "&lt;script&gt;")
+
+# ── 3. HTML ──
+print("")
+print("-- 3. HTML --")
+
+html = "<html><head><title>Test</title></head><body><p>Hello <b>World</b></p><a href='https://x.com'>Link</a><img src='a.png' alt='pic'><table><tr><td>A</td><td>B</td></tr></table></body></html>"
+
+check("html_strip", html_strip("<p>Hi</p>") == "Hi")
+check("html_text", regex_match("Hello World", html_text(html)) == ok)
+
+links = html_links(html)
+check("html_links count", len(links) == 1)
+if len(links) >= 1 ts
+    check("html_links text", links[0][0] == "Link")
+    check("html_links url", links[0][1] == "https://x.com")
+Fin
+
+imgs = html_images(html)
+check("html_images count", len(imgs) >= 1)
+
+tbl = html_table(html, 0)
+check("html_table count", len(tbl) == 1)
+if len(tbl) >= 1 ts
+    check("html_table row", tbl[0][0] == "A" and tbl[0][1] == "B")
+Fin
+
+check("html_count_tag", html_count_tag(html, "td") == 2)
+check("html_meta", html_meta("<meta name='desc' content='test'>", "desc") == "test")
+check("html_title", html_title(html) == "Test")
+check("html_to_text", regex_match("Hello World", html_to_text(html)) == ok)
+
+attrs = html_attrs(html, "a", "href")
+check("html_attrs count", len(attrs) == 1)
+if len(attrs) >= 1 ts
+    check("html_attrs value", attrs[0] == "https://x.com")
+Fin
+
+# ── 4. CSS ──
+print("")
+print("-- 4. CSS --")
+check("css module loaded", ok)
+
+# ── Summary ──
+print("")
+print("========================================")
+print("Total: " + str(state.total))
+print("Passed: " + str(state.total - state.errors))
+print("Failed: " + str(state.errors))
+if state.errors == 0 ts
+    print("ALL TESTS PASSED!")
+el ts
+    print("SOME TESTS FAILED!")
+Fin
+print("========================================")

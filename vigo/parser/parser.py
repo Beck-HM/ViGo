@@ -6,18 +6,41 @@ from .ast_nodes import *
 class Parser:
     def __init__(self, lexer):
         self.lexer = lexer
+        self.source = lexer.source  # Keep source for error display
         self.current_token = self.lexer.get_next_token()
         self._destructure_names = []
 
-    def error(self, msg):
+    def error(self, msg, help_text=None):
         t = self.current_token
-        raise Exception(f"Syntax error [Line{t.line}, Column{t.column}]: {msg}")
+        line_num = t.line
+        col_num = t.column
+
+        # Build the error header
+        lines = [f"Syntax error [Line{line_num}, Column{col_num}]: {msg}"]
+
+        # Show the source line with a pointer
+        source_lines = self.source.split('\n')
+        if line_num <= len(source_lines):
+            offending_line = source_lines[line_num - 1]
+            lines.append(f"  {offending_line}")
+            # Point to the error column
+            pointer = ' ' * (col_num + 1) + '^'
+            lines.append(f"  {pointer}")
+
+        # Add help text if provided
+        if help_text:
+            lines.append(f"Help: {help_text}")
+
+        raise Exception('\n'.join(lines))
 
     def eat(self, tt):
         if self.current_token.type == tt:
             self.current_token = self.lexer.get_next_token()
         else:
-            self.error(f"Expected {tt.name}, but got {self.current_token.type.name}('{self.current_token.value}')")
+            self.error(
+                f"Expected {tt.name}, but got {self.current_token.type.name}('{self.current_token.value}')",
+                f"Check that you used the correct delimiter here. Expected {tt.name}."
+            )
 
     def match(self, tt):
         if self.current_token.type == tt:
@@ -296,17 +319,25 @@ class Parser:
     # ── switch ──
     def parse_switch_stmt(self):
         self.eat(TokenType.SWITCH)
+        # Parse the switch expression (e.g., `switch x ts`)
         expr = self.parse_expression()
         self.eat(TokenType.TS)
+
         cases = []
         default_body = []
         depth = 1
         fin_consumed = False
+
+        # Main loop: iterate through all case/default blocks until the outer Fin
         while depth > 0:
             t = self.current_token
+
+            # Nested ts inside case body — increase depth so outer Fin won't close early
             if t.type == TokenType.TS:
                 depth += 1
                 self.eat(TokenType.TS)
+
+            # Fin at depth 0 closes the entire switch; deeper Fins close inner blocks
             elif t.type == TokenType.FIN:
                 depth -= 1
                 if depth == 0:
@@ -314,13 +345,19 @@ class Parser:
                     fin_consumed = True
                     break
                 self.eat(TokenType.FIN)
+
             elif t.type == TokenType.EOF:
                 self.error("switch missing Fin")
+
+            # Case block: parse value, eat its ts, delegate body to _parse_block
             elif t.type == TokenType.CASE:
                 self.eat(TokenType.CASE)
+
+                # Case value can be a number, a range (num..num), a string, or a literal
                 if self.current_token.type == TokenType.NUMBER:
                     start = self.current_token.value
                     self.eat(TokenType.NUMBER)
+                    # Range matching: `case 0..59 ts`
                     if self.current_token.type == TokenType.RANGE:
                         self.eat(TokenType.RANGE)
                         end = self.current_token.value
@@ -333,48 +370,24 @@ class Parser:
                     self.eat(TokenType.STRING)
                 else:
                     case_val = self.eval_literal()
+
+                # Eat the ts that opens this case's body
                 self.eat(TokenType.TS)
-                case_body = []
-                case_depth = 1
-                while True:
-                    t2 = self.current_token
-                    if t2.type == TokenType.TS:
-                        case_depth += 1
-                        self.eat(TokenType.TS)
-                        continue
-                    if t2.type == TokenType.FIN:
-                        case_depth -= 1
-                        if case_depth == 0:
-                            self.eat(TokenType.FIN)
-                            break
-                        self.eat(TokenType.FIN)
-                        continue
-                    if t2.type in (TokenType.CASE, TokenType.DEFAULT):
-                        break
-                    if t2.type == TokenType.EOF:
-                        self.error("switch case missing Fin")
-                    case_body.append(self.parse_statement())
+                # _parse_block stops at next CASE, DEFAULT, or the outer Fin
+                case_body, _, _ = self._parse_block(terminators={TokenType.CASE, TokenType.DEFAULT})
                 cases.append((case_val, case_body))
+
+            # Default block: same logic as case but with empty terminators
             elif t.type == TokenType.DEFAULT:
                 self.eat(TokenType.DEFAULT)
                 self.eat(TokenType.TS)
-                default_depth = 1
-                while True:
-                    t3 = self.current_token
-                    if t3.type == TokenType.TS:
-                        default_depth += 1
-                        self.eat(TokenType.TS)
-                        continue
-                    if t3.type == TokenType.FIN:
-                        default_depth -= 1
-                        if default_depth == 0:
-                            self.eat(TokenType.FIN)
-                            break
-                        self.eat(TokenType.FIN)
-                        continue
-                    if t3.type == TokenType.EOF:
-                        self.error("switch default missing Fin")
-                    default_body.append(self.parse_statement())
+                # Default always runs to the outer Fin (no case/default terminators)
+                default_body, _, _ = self._parse_block(terminators=set())
+
+            else:
+                # Skip any unexpected tokens inside switch block
+                self.eat(t.type)
+
         self.optional_semicolon()
         return SwitchStmt(expr, cases, default_body)
 
@@ -741,6 +754,28 @@ class Parser:
     def parse_args(self):
         args = []
         if self.current_token.type == TokenType.RPAREN: return args
+        if self.current_token.type == TokenType.IDENTIFIER:
+            # Peek ahead: if next token is '=', it's a named parameter (not supported)
+            saved = (self.lexer.pos, self.lexer.line, self.lexer.col, self.lexer.current_char, self.current_token)
+            self.eat(TokenType.IDENTIFIER)
+            if self.current_token.type == TokenType.ASSIGN:
+                self._restore(saved)
+                self.error(
+                    f"Unexpected '=' in function call arguments",
+                    "ViGo does not support named parameters. Use positional arguments instead."
+                )
+            self._restore(saved)
         args.append(self.parse_expression())
-        while self.match(TokenType.COMMA): args.append(self.parse_expression())
+        while self.match(TokenType.COMMA):
+            if self.current_token.type == TokenType.IDENTIFIER:
+                saved = (self.lexer.pos, self.lexer.line, self.lexer.col, self.lexer.current_char, self.current_token)
+                self.eat(TokenType.IDENTIFIER)
+                if self.current_token.type == TokenType.ASSIGN:
+                    self._restore(saved)
+                    self.error(
+                        f"Unexpected '=' in function call arguments",
+                        "ViGo does not support named parameters. Use positional arguments instead."
+                    )
+                self._restore(saved)
+            args.append(self.parse_expression())
         return args

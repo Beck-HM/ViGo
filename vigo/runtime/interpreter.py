@@ -6,6 +6,7 @@ from .environment import Environment
 from .objects import (BuiltinFunction, ViGoFunction, LambdaFunction, ViGoClass, ViGoInstance, ViGoEnum)
 from .errors import (ViGoError, ReturnException, BreakException, ContinueException, AwaitException)
 from .builtins import register as register_builtins
+from .blocks import eval_block, is_truthy, eval_if, eval_for_in, eval_loop, eval_do_while, eval_switch, eval_try, eval_listcomp
 
 
 class Interpreter:
@@ -17,6 +18,14 @@ class Interpreter:
         self.call_depth = 0; self.source_file = source_file
         self.call_trace = []; self.timeout = None; self.start_time = None
         self.constants = set()
+        # Hook system for community extensions
+        self.hooks = {
+            "before_eval": [],       # (node, env) -> None
+            "after_eval": [],        # (node, result, env) -> None
+            "before_func_call": [],  # (call_node, args, env) -> None
+            "after_func_call": [],   # (call_node, result, env) -> None
+            "on_error": [],          # (exception, node, env) -> None
+        }
 
     def register(self, name, func): self.global_env.define(name, BuiltinFunction(func, name))
     def register_object(self, name, obj): self.global_env.define(name, obj)
@@ -27,6 +36,17 @@ class Interpreter:
 
     def set_timeout(self, sec): self.timeout = sec
 
+    def register_hook(self, hook_name, callback):
+        """Register a hook callback. Supported hooks: before_eval, after_eval,
+        before_func_call, after_func_call, on_error."""
+        if hook_name in self.hooks:
+            self.hooks[hook_name].append(callback)
+
+    def unregister_hook(self, hook_name, callback):
+        """Remove a previously registered hook callback."""
+        if hook_name in self.hooks and callback in self.hooks[hook_name]:
+            self.hooks[hook_name].remove(callback)
+
     def _check_timeout(self):
         if self.timeout and self.start_time and time.time() - self.start_time > self.timeout:
             raise ViGoError("Script execution timeout")
@@ -36,107 +56,388 @@ class Interpreter:
         for stmt in program.statements: result = self.eval(stmt)
         return result
 
+    def interpret_ir(self, program):
+        """Execute via IR: AST → IR → optimized IR → interpret."""
+        from ..ir import IRBuilder, IROptimizer
+        builder = IRBuilder()
+        ir = builder.build(program)
+        optimizer = IROptimizer()
+        ir = optimizer.optimize(ir)
+        self._exec_ir(ir)
+
+    def _exec_ir(self, instructions):
+        """Execute a list of IR instructions using a value stack and temp store."""
+        temps = {}
+        pc = 0
+        while pc < len(instructions):
+            inst = instructions[pc]
+
+            if inst.opcode == IR_LOAD_CONST:
+                temps[inst.result] = inst.operands[0] if inst.operands else None
+
+            elif inst.opcode == IR_ADD:
+                left = self._ir_value(inst.operands[0], temps)
+                right = self._ir_value(inst.operands[1], temps)
+                temps[inst.result] = left + right
+
+            elif inst.opcode == IR_SUB:
+                left = self._ir_value(inst.operands[0], temps)
+                right = self._ir_value(inst.operands[1], temps)
+                temps[inst.result] = left - right
+
+            elif inst.opcode == IR_MUL:
+                left = self._ir_value(inst.operands[0], temps)
+                right = self._ir_value(inst.operands[1], temps)
+                temps[inst.result] = left * right
+
+            elif inst.opcode == IR_DIV:
+                left = self._ir_value(inst.operands[0], temps)
+                right = self._ir_value(inst.operands[1], temps)
+                temps[inst.result] = left / right if right != 0 else 0
+
+            elif inst.opcode == IR_STORE:
+                var_name = inst.operands[0]
+                val = self._ir_value(inst.operands[1], temps)
+                self.global_env.define(var_name, val)
+
+            elif inst.opcode == IR_LOAD:
+                var_name = inst.operands[0]
+                temps[inst.result] = self.global_env.lookup(var_name)
+
+            elif inst.opcode == IR_JUMP_IF_FALSE:
+                cond = self._ir_value(inst.operands[0], temps)
+                if not cond:
+                    # Find the label
+                    label = inst.operands[1]
+                    for j, i2 in enumerate(instructions):
+                        if i2.opcode == "IR_LABEL" and i2.operands and i2.operands[0] == label:
+                            pc = j
+                            break
+
+            elif inst.opcode == "IR_JUMP":
+                label = inst.operands[0]
+                for j, i2 in enumerate(instructions):
+                    if i2.opcode == "IR_LABEL" and i2.operands and i2.operands[0] == label:
+                        pc = j
+                        break
+
+            elif inst.opcode == IR_CALL:
+                func_name = inst.operands[0]
+                args = [self._ir_value(a, temps) for a in inst.operands[1:]]
+                func = self.global_env.lookup(func_name)
+                if isinstance(func, BuiltinFunction):
+                    temps[inst.result] = func.func(*args)
+
+            elif inst.opcode == IR_RETURN:
+                # Return value is stored in temps; we just stop here for simple IR
+                pass
+
+            elif inst.opcode == "IR_LABEL" or inst.opcode == "IR_COMMENT":
+                pass
+
+            pc += 1
+
+    def _ir_value(self, operand, temps):
+        """Resolve an IR operand: if it's a temp name, look it up; otherwise return as-is."""
+        if isinstance(operand, str) and operand in temps:
+            return temps[operand]
+        return operand
+
+    # ── Block execution helpers (delegated to runtime/blocks.py) ──
+
+    def eval_block(self, stmts, env):
+        return eval_block(self, stmts, env)
+
+    def is_truthy(self, v):
+        return is_truthy(v)
+
+    # ── AST node dispatch table ──
+    _EVAL_DISPATCH = None
+
+    def _init_dispatch(self):
+        self._EVAL_DISPATCH = {
+            'Program':             self._eval_Program,
+            'VarDecl':             self._eval_VarDecl,
+            'DestructureDecl':     self._eval_DestructureDecl,
+            'AssignStmt':          self._eval_AssignStmt,
+            'IfStmt':              self._eval_IfStmt,
+            'SkipStmt':            self._eval_SkipStmt,
+            'TernaryExpr':         self._eval_TernaryExpr,
+            'SwitchStmt':          self._eval_SwitchStmt,
+            'ForInStmt':           self._eval_ForInStmt,
+            'LoopStmt':            self._eval_LoopStmt,
+            'DoWhileStmt':         self._eval_DoWhileStmt,
+            'BreakStmt':           self._eval_BreakStmt,
+            'ContinueStmt':        self._eval_ContinueStmt,
+            'SureStmt':            self._eval_SureStmt,
+            'StaticMethodDef':     self._eval_StaticMethodDef,
+            'AbstractMethodDef':   self._eval_AbstractMethodDef,
+            'InterfaceDef':        self._eval_InterfaceDef,
+            'FuncDef':             self._eval_FuncDef,
+            'LambdaExpr':          self._eval_LambdaExpr,
+            'ReturnStmt':          self._eval_ReturnStmt,
+            'FuncCall':            self._eval_FuncCall,
+            'PipeExpr':            self._eval_PipeExpr,
+            'RangeExpr':           self._eval_RangeExpr,
+            'ExpandExpr':          self._eval_ExpandExpr,
+            'OptionalChain':       self._eval_OptionalChain,
+            'NullCoalesce':        self._eval_NullCoalesce,
+            'ListCompExpr':        self._eval_ListCompExpr,
+            'ChainedCompare':      self._eval_ChainedCompare,
+            'InExpr':              self._eval_InExpr,
+            'BinaryOp':            self._eval_BinaryOp,
+            'LogicalOp':           self._eval_LogicalOp,
+            'UnaryOp':             self._eval_UnaryOp,
+            'Literal':             self._eval_Literal,
+            'Variable':            self._eval_Variable,
+            'ListLiteral':         self._eval_ListLiteral,
+            'DictLiteral':         self._eval_DictLiteral,
+            'SetLiteral':          self._eval_SetLiteral,
+            'IndexAccess':         self._eval_IndexAccess,
+            'SliceAccess':         self._eval_SliceAccess,
+            'DotAccess':           self._eval_DotAccess,
+            'InterpolatedString':  self._eval_InterpolatedString,
+            'LoadStmt':            self._eval_LoadStmt,
+            'ClassDef':            self._eval_ClassDef,
+            'EnumDef':             self._eval_EnumDef,
+            'NewExpr':             self._eval_NewExpr,
+            'ThisExpr':            self._eval_ThisExpr,
+            'TryStmt':             self._eval_TryStmt,
+            'ThrowStmt':           self._eval_ThrowStmt,
+            'AwaitExpr':           self._eval_AwaitExpr,
+        }
+
     def eval(self, node, env=None):
         self._check_timeout()
-        if env is None: env = self.global_env
-        try:
-            if isinstance(node, Program): return self.eval_block(node.statements, env)
-            elif isinstance(node, VarDecl):
-                if node.name in self.constants:
-                    raise ViGoError(f"Cannot modify constant '{node.name}'")
-                val = self.eval(node.value, env)
-                if node.is_const: self.constants.add(node.name)
-                if env.has(node.name) and not node.is_const:
-                    env.assign(node.name, val)
-                else:
-                    env.define(node.name, val)
-                return val
-            elif isinstance(node, DestructureDecl): return self._destructure(node, env)
-            elif isinstance(node, AssignStmt):
-                if isinstance(node.target, Variable) and node.target.name in self.constants:
-                    raise ViGoError(f"Cannot modify constant '{node.target.name}'")
-                return self._assign(node, env)
-            elif isinstance(node, IfStmt): return self._if(node, env)
-            elif isinstance(node, SkipStmt):
-                if not self.is_truthy(self.eval(node.condition, env)):
-                    return self.eval_block(node.body, Environment(env))
-                return None
-            elif isinstance(node, TernaryExpr):
-                return self.eval(node.then_expr, env) if self.is_truthy(self.eval(node.condition, env)) else self.eval(node.else_expr, env)
-            elif isinstance(node, SwitchStmt): return self._switch(node, env)
-            elif isinstance(node, ForInStmt): return self._for_in(node, env)
-            elif isinstance(node, LoopStmt): return self._loop(node, env)
-            elif isinstance(node, DoWhileStmt): return self._do_while(node, env)
-            elif isinstance(node, BreakStmt): raise BreakException()
-            elif isinstance(node, ContinueStmt): raise ContinueException()
-            elif isinstance(node, SureStmt):
-                if not self.is_truthy(self.eval(node.condition, env)):
-                    raise ViGoError(f"Assertion failed: {node.message or 'Condition not satisfied'}")
-                return True
-            elif isinstance(node, StaticMethodDef):
-                func = ViGoFunction(node.func_def.name, node.func_def.params,
-                                    node.func_def.defaults, node.func_def.rest_param,
-                                    node.func_def.body, env, self.source_file)
-                func.is_static = True; env.define(node.func_def.name, func); return func
-            elif isinstance(node, AbstractMethodDef): return node
-            elif isinstance(node, InterfaceDef):
-                env.define(node.name, {'__vigo_interface__': True, 'name': node.name, 'methods': node.methods}); return node
-            elif isinstance(node, FuncDef):
-                func = ViGoFunction(node.name, node.params, node.defaults, node.rest_param, node.body, env, self.source_file)
-                env.define(node.name, func); return func
-            elif isinstance(node, LambdaExpr): return LambdaFunction(node.params, node.body, env)
-            elif isinstance(node, ReturnStmt): raise ReturnException(self.eval(node.value, env))
-            elif isinstance(node, FuncCall): return self._func_call(node, env)
-            elif isinstance(node, PipeExpr): return self._pipe(node, env)
-            elif isinstance(node, RangeExpr):
-                return list(range(int(self.eval(node.start, env)), int(self.eval(node.end, env)) + 1))
-            elif isinstance(node, ExpandExpr): return self.eval(node.expr, env)
-            elif isinstance(node, OptionalChain):
-                try:
-                    obj = self.eval(node.object, env)
-                    return None if obj is None else self.eval(node.chain, Environment(env))
-                except ViGoError: return None
-            elif isinstance(node, NullCoalesce):
-                left = self.eval(node.left, env); return left if left is not None else self.eval(node.right, env)
-            elif isinstance(node, ListCompExpr): return self._listcomp(node, env)
-            elif isinstance(node, ChainedCompare): return self._chained_compare(node, env)
-            elif isinstance(node, InExpr): return self._in_expr(node, env)
-            elif isinstance(node, BinaryOp): return self._binary_op(node, env)
-            elif isinstance(node, LogicalOp): return self._logical_op(node, env)
-            elif isinstance(node, UnaryOp): return self._unary_op(node, env)
-            elif isinstance(node, Literal): return node.value
-            elif isinstance(node, Variable): return env.lookup(node.name)
-            elif isinstance(node, ListLiteral): return [self.eval(el, env) for el in node.elements]
-            elif isinstance(node, DictLiteral): return {k: self.eval(v, env) for k, v in node.pairs.items()}
-            elif isinstance(node, SetLiteral): return {self.eval(el, env) for el in node.elements}
-            elif isinstance(node, IndexAccess): return self._index(node, env)
-            elif isinstance(node, SliceAccess): return self._slice(node, env)
-            elif isinstance(node, DotAccess): return self._dot(node, env)
-            elif isinstance(node, InterpolatedString): return self._interp_str(node, env)
-            elif isinstance(node, LoadStmt): return self._load(node, env)
-            elif isinstance(node, ClassDef): return self._class_def(node, env)
-            elif isinstance(node, EnumDef): return self._enum_def(node, env)
-            elif isinstance(node, NewExpr): return self._new(node, env)
-            elif isinstance(node, ThisExpr): return env.lookup('this')
-            elif isinstance(node, TryStmt): return self._try(node, env)
-            elif isinstance(node, ThrowStmt): raise ViGoError(str(self.eval(node.value, env)))
-            elif isinstance(node, AwaitExpr): raise AwaitException(float(self.eval(node.value, env)))
-            else: raise ViGoError(f"Unknown AST node: {type(node).__name__}")
-        except (ReturnException, BreakException, ContinueException, AwaitException): raise
-        except ViGoError: raise
-        except Exception as e: raise ViGoError(str(e), self.call_trace.copy())
+        if env is None:
+            env = self.global_env
 
-    def _switch(self, node, env):
-        val = self.eval(node.expr, env)
-        for cv, cb in node.cases:
-            if isinstance(cv, tuple) and len(cv) == 3 and cv[0] == 'range':
-                if cv[1] <= val <= cv[2]:
-                    return self.eval_block(cb, env)
-            elif val == cv:
-                return self.eval_block(cb, env)
-        if node.default_body:
-            return self.eval_block(node.default_body, env)
+        if self._EVAL_DISPATCH is None:
+            self._init_dispatch()
+
+        node_type = type(node).__name__
+        handler = self._EVAL_DISPATCH.get(node_type)
+        if handler is None:
+            raise ViGoError(f"Unknown AST node: {node_type}")
+
+        # before_eval hook
+        for hook in self.hooks.get("before_eval", []):
+            try:
+                hook(node, env)
+            except Exception:
+                pass
+
+        try:
+            result = handler(node, env)
+
+            # after_eval hook
+            for hook in self.hooks.get("after_eval", []):
+                try:
+                    hook(node, result, env)
+                except Exception:
+                    pass
+
+            return result
+        except (ReturnException, BreakException, ContinueException, AwaitException):
+            raise
+        except ViGoError:
+            raise
+        except Exception as e:
+            # on_error hook
+            for hook in self.hooks.get("on_error", []):
+                try:
+                    hook(e, node, env)
+                except Exception:
+                    pass
+            raise ViGoError(str(e), self.call_trace.copy())
+
+    # ═══════════════════════════════════════════════
+    #  Eval handlers — one per AST node type
+    # ═══════════════════════════════════════════════
+
+    def _eval_Program(self, node, env):
+        return eval_block(self, node.statements, env)
+
+    def _eval_VarDecl(self, node, env):
+        if node.name in self.constants:
+            raise ViGoError(f"Cannot modify constant '{node.name}'")
+        val = self.eval(node.value, env)
+        if node.is_const:
+            self.constants.add(node.name)
+        if env.has(node.name) and not node.is_const:
+            env.assign(node.name, val)
+        else:
+            env.define(node.name, val)
+        return val
+
+    def _eval_DestructureDecl(self, node, env):
+        return self._destructure(node, env)
+
+    def _eval_AssignStmt(self, node, env):
+        if isinstance(node.target, Variable) and node.target.name in self.constants:
+            raise ViGoError(f"Cannot modify constant '{node.target.name}'")
+        return self._assign(node, env)
+
+    def _eval_IfStmt(self, node, env):
+        return eval_if(self, node, env)
+
+    def _eval_SkipStmt(self, node, env):
+        if not is_truthy(self.eval(node.condition, env)):
+            return eval_block(self, node.body, Environment(env))
         return None
+
+    def _eval_TernaryExpr(self, node, env):
+        return self.eval(node.then_expr, env) if is_truthy(self.eval(node.condition, env)) else self.eval(node.else_expr, env)
+
+    def _eval_SwitchStmt(self, node, env):
+        return eval_switch(self, node, env)
+
+    def _eval_ForInStmt(self, node, env):
+        return eval_for_in(self, node, env)
+
+    def _eval_LoopStmt(self, node, env):
+        return eval_loop(self, node, env)
+
+    def _eval_DoWhileStmt(self, node, env):
+        return eval_do_while(self, node, env)
+
+    def _eval_BreakStmt(self, node, env):
+        raise BreakException()
+
+    def _eval_ContinueStmt(self, node, env):
+        raise ContinueException()
+
+    def _eval_SureStmt(self, node, env):
+        if not is_truthy(self.eval(node.condition, env)):
+            raise ViGoError(f"Assertion failed: {node.message or 'Condition not satisfied'}")
+        return True
+
+    def _eval_StaticMethodDef(self, node, env):
+        func = ViGoFunction(node.func_def.name, node.func_def.params,
+                            node.func_def.defaults, node.func_def.rest_param,
+                            node.func_def.body, env, self.source_file)
+        func.is_static = True
+        env.define(node.func_def.name, func)
+        return func
+
+    def _eval_AbstractMethodDef(self, node, env):
+        return node
+
+    def _eval_InterfaceDef(self, node, env):
+        env.define(node.name, {'__vigo_interface__': True, 'name': node.name, 'methods': node.methods})
+        return node
+
+    def _eval_FuncDef(self, node, env):
+        func = ViGoFunction(node.name, node.params, node.defaults, node.rest_param, node.body, env, self.source_file)
+        env.define(node.name, func)
+        return func
+
+    def _eval_LambdaExpr(self, node, env):
+        return LambdaFunction(node.params, node.body, env)
+
+    def _eval_ReturnStmt(self, node, env):
+        raise ReturnException(self.eval(node.value, env))
+
+    def _eval_FuncCall(self, node, env):
+        return self._func_call(node, env)
+
+    def _eval_PipeExpr(self, node, env):
+        return self._pipe(node, env)
+
+    def _eval_RangeExpr(self, node, env):
+        return list(range(int(self.eval(node.start, env)), int(self.eval(node.end, env)) + 1))
+
+    def _eval_ExpandExpr(self, node, env):
+        return self.eval(node.expr, env)
+
+    def _eval_OptionalChain(self, node, env):
+        try:
+            obj = self.eval(node.object, env)
+            if obj is None:
+                return None
+            result = self.eval(node.chain, Environment(env))
+            return None if result is None else result
+        except ViGoError:
+            return None
+
+    def _eval_NullCoalesce(self, node, env):
+        left = self.eval(node.left, env)
+        if left is None:
+            return self.eval(node.right, env)
+        return left
+
+    def _eval_ListCompExpr(self, node, env):
+        return eval_listcomp(self, node, env)
+
+    def _eval_ChainedCompare(self, node, env):
+        return self._chained_compare(node, env)
+
+    def _eval_InExpr(self, node, env):
+        return self._in_expr(node, env)
+
+    def _eval_BinaryOp(self, node, env):
+        return self._binary_op(node, env)
+
+    def _eval_LogicalOp(self, node, env):
+        return self._logical_op(node, env)
+
+    def _eval_UnaryOp(self, node, env):
+        return self._unary_op(node, env)
+
+    def _eval_Literal(self, node, env):
+        return node.value
+
+    def _eval_Variable(self, node, env):
+        return env.lookup(node.name)
+
+    def _eval_ListLiteral(self, node, env):
+        return [self.eval(el, env) for el in node.elements]
+
+    def _eval_DictLiteral(self, node, env):
+        return {k: self.eval(v, env) for k, v in node.pairs.items()}
+
+    def _eval_SetLiteral(self, node, env):
+        return {self.eval(el, env) for el in node.elements}
+
+    def _eval_IndexAccess(self, node, env):
+        return self._index(node, env)
+
+    def _eval_SliceAccess(self, node, env):
+        return self._slice(node, env)
+
+    def _eval_DotAccess(self, node, env):
+        return self._dot(node, env)
+
+    def _eval_InterpolatedString(self, node, env):
+        return self._interp_str(node, env)
+
+    def _eval_LoadStmt(self, node, env):
+        return self._load(node, env)
+
+    def _eval_ClassDef(self, node, env):
+        return self._class_def(node, env)
+
+    def _eval_EnumDef(self, node, env):
+        return self._enum_def(node, env)
+
+    def _eval_NewExpr(self, node, env):
+        return self._new(node, env)
+
+    def _eval_ThisExpr(self, node, env):
+        return env.lookup('this')
+
+    def _eval_TryStmt(self, node, env):
+        return eval_try(self, node, env)
+
+    def _eval_ThrowStmt(self, node, env):
+        raise ViGoError(str(self.eval(node.value, env)))
+
+    def _eval_AwaitExpr(self, node, env):
+        raise AwaitException(float(self.eval(node.value, env)))
+
+    # ═══════════════════════════════════════════════
+    #  Expression & object logic (remain in interpreter)
+    # ═══════════════════════════════════════════════
 
     def _class_def(self, node, env):
         parent = env.lookup(node.parent) if node.parent else None
@@ -169,13 +470,32 @@ class Interpreter:
                     func = obj[mn]
                 else:
                     func = self._dot(DotAccess(Literal(obj), mn), env)
+            elif isinstance(obj, (list, str, set)):
+                func = self._dot(DotAccess(Literal(obj), mn), env)
             else:
                 func = self._dot(DotAccess(Literal(obj), mn), env)
         elif isinstance(node.name, Variable):
             func = env.lookup(node.name.name); func_name = node.name.name
         else:
             func = self.eval(node.name, env)
-        return self._call(func, args, env, func_name, this_obj)
+
+        # before_func_call hook
+        for hook in self.hooks.get("before_func_call", []):
+            try:
+                hook(node, args, env)
+            except Exception:
+                pass
+
+        result = self._call(func, args, env, func_name, this_obj)
+
+        # after_func_call hook
+        for hook in self.hooks.get("after_func_call", []):
+            try:
+                hook(node, result, env)
+            except Exception:
+                pass
+
+        return result
 
     def _call(self, func, args, env, func_name, this_obj=None):
         if self.call_depth > self.MAX_CALL_DEPTH: raise ViGoError("Maximum call depth exceeded")
@@ -195,7 +515,7 @@ class Interpreter:
             for p, a in zip(func.params, final_args[:expected]): call_env.define(p, a)
             if func.rest_param: call_env.define(func.rest_param, final_args[expected] if len(final_args) > expected else [])
             self.call_depth += 1; self.call_trace.append(f"{func_name}()")
-            try: return self.eval_block(func.body, call_env)
+            try: return eval_block(self, func.body, call_env)
             except ReturnException as r: return r.value
             finally:
                 self.call_depth -= 1
@@ -214,7 +534,7 @@ class Interpreter:
                     for p, a in zip(init_f.params, fa[:exp]): ce.define(p, a)
                     self.call_depth += 1; self.call_trace.append(f"{func.name}.init()")
                     try:
-                        self.eval_block(init_f.body, ce)
+                        eval_block(self, init_f.body, ce)
                     except ReturnException:
                         pass
                     finally:
@@ -289,91 +609,46 @@ class Interpreter:
             if right == 0: raise ViGoError("Modulo by zero"); return cur % right
         return right
 
-    def _if(self, node, env):
-        if self.is_truthy(self.eval(node.condition, env)):
-            return self.eval_block(node.then_body, env)
-        for bc, bb in node.else_body:
-            if bc is None or self.is_truthy(self.eval(bc, env)):
-                return self.eval_block(bb, env)
-        return None
-
-    def _for_in(self, node, env):
-        it = self.eval(node.iterable, env)
-        result = None
-        items = it if isinstance(it, (list, str)) else (it.keys() if isinstance(it, dict) else [])
-        for item in items:
-            env.define(node.var_name, item)
-            try:
-                result = self.eval_block(node.body, env)
-            except BreakException:
-                break
-            except ContinueException:
-                continue
-        return result
-
-    def _loop(self, node, env):
-        result = None
-        while self.is_truthy(self.eval(node.condition, env)):
-            try:
-                result = self.eval_block(node.body, env)
-            except BreakException:
-                break
-            except ContinueException:
-                continue
-        return result
-
-    def _do_while(self, node, env):
-        result = None
-        while True:
-            try: result = self.eval_block(node.body, env)
-            except BreakException: break
-            except ContinueException: continue
-            if not self.is_truthy(self.eval(node.condition, env)): break
-        return result
-
-    def _listcomp(self, node, env):
-        it = self.eval(node.iterable, env); result = []
-        items = it if isinstance(it, (list, str)) else (it.keys() if isinstance(it, dict) else [])
-        for item in items:
-            ie = Environment(env); ie.define(node.var, item)
-            if node.condition is None or self.is_truthy(self.eval(node.condition, ie)):
-                result.append(self.eval(node.expr, ie))
-        return result
+    @staticmethod
+    def _null_safe_compare(left, right, op):
+        """Compare two values with null safety. Returns comparison result or False on TypeError."""
+        if left is None or right is None:
+            if op == '==':
+                return left is None and right is None
+            if op == '!=':
+                return left is not right
+            return False
+        try:
+            if op == '<':   return left < right
+            if op == '<=':  return left <= right
+            if op == '>':   return left > right
+            if op == '>=':  return left >= right
+            if op == '==':  return left == right
+            if op == '!=':  return left != right
+        except TypeError:
+            return False
+        return False
 
     def _chained_compare(self, node, env):
-        operands = [self.eval(o, env) for o in node.operands]
+        try:
+            operands = [self.eval(o, env) for o in node.operands]
+        except ViGoError:
+            return False
         for i, op in enumerate(node.ops):
             left = operands[i]
             right = operands[i+1]
-            if left is None or right is None:
-                if op == '==': return left is None and right is None
-                if op == '!=': return left is not right
+            if not self._null_safe_compare(left, right, op):
                 return False
-            if op == '<' and not (left < right): return False
-            elif op == '<=' and not (left <= right): return False
-            elif op == '>' and not (left > right): return False
-            elif op == '>=' and not (left >= right): return False
-            elif op == '==' and not (left == right): return False
-            elif op == '!=' and not (left != right): return False
         return True
 
-    def _in_expr(self, node, env):
-        left = self.eval(node.left, env); right = self.eval(node.right, env)
-        result = left in right if isinstance(right, (list, str, dict, set)) else False
-        return not result if node.negated else result
-
     def _binary_op(self, node, env):
-        left = self.eval(node.left, env); right = self.eval(node.right, env); op = node.op
+        left = self.eval(node.left, env)
+        right = self.eval(node.right, env)
+        op = node.op
+
         if op in ('==', '!=', '<', '>', '<=', '>='):
-            if op in ('==', '!='):
-                if left is None and right is None:
-                    return op == '=='
-                if left is None or right is None:
-                    return op == '!='
-            if left is None or right is None:
-                return False
-            return {'==': left == right, '!=': left != right, '<': left < right,
-                    '>': left > right, '<=': left <= right, '>=': left >= right}[op]
+            return self._null_safe_compare(left, right, op)
+
         if op == '+':
             if isinstance(left, str) or isinstance(right, str): return str(left) + str(right)
             if isinstance(left, list) and isinstance(right, list): return left + right
@@ -408,12 +683,12 @@ class Interpreter:
 
     def _logical_op(self, node, env):
         left = self.eval(node.left, env)
-        if node.op == 'and': return left if not self.is_truthy(left) else self.eval(node.right, env)
-        return left if self.is_truthy(left) else self.eval(node.right, env)
+        if node.op == 'and': return left if not is_truthy(left) else self.eval(node.right, env)
+        return left if is_truthy(left) else self.eval(node.right, env)
 
     def _unary_op(self, node, env):
         opd = self.eval(node.operand, env)
-        return {'!': not self.is_truthy(opd), '-': -opd, 'not': not self.is_truthy(opd), '~': ~int(opd) if opd is not None else 0}[node.op]
+        return {'!': not is_truthy(opd), '-': -opd, 'not': not is_truthy(opd), '~': ~int(opd) if opd is not None else 0}[node.op]
 
     def _index(self, node, env):
         obj = self.eval(node.object, env); idx = self.eval(node.index, env)
@@ -449,6 +724,11 @@ class Interpreter:
             if attr == 'push': return BuiltinFunction(lambda item: obj.append(item) or obj, 'push')
             if attr == 'pop': return BuiltinFunction(lambda: obj.pop() if obj else None, 'pop')
             if attr == 'reverse': return BuiltinFunction(lambda: obj.reverse() or obj, 'reverse')
+            if attr == 'extend': return BuiltinFunction(lambda other: obj.extend(other) or obj, 'extend')
+            if attr == 'insert': return BuiltinFunction(lambda idx, item: obj.insert(int(idx), item) or obj, 'insert')
+            if attr == 'remove': return BuiltinFunction(lambda item: obj.remove(item) if item in obj else None or obj, 'remove')
+            if attr == 'find': return BuiltinFunction(lambda item: obj.index(item) if item in obj else -1, 'find')
+            if attr == 'sort': return BuiltinFunction(lambda key=None, reverse=False: obj.sort(key=key, reverse=reverse) or obj, 'sort')
         if isinstance(obj, str):
             if attr == 'upper': return BuiltinFunction(lambda: obj.upper(), 'upper')
             if attr == 'lower': return BuiltinFunction(lambda: obj.lower(), 'lower')
@@ -456,9 +736,16 @@ class Interpreter:
             if attr == 'split': return BuiltinFunction(lambda delim: obj.split(delim), 'split')
             if attr == 'join': return BuiltinFunction(lambda items: obj.join(items), 'join')
             if attr == 'replace': return BuiltinFunction(lambda old, new: obj.replace(old, new), 'replace')
+            if attr == 'startswith': return BuiltinFunction(lambda prefix: obj.startswith(prefix), 'startswith')
+            if attr == 'endswith': return BuiltinFunction(lambda suffix: obj.endswith(suffix), 'endswith')
+            if attr == 'contains': return BuiltinFunction(lambda sub: sub in obj, 'contains')
+            if attr == 'find': return BuiltinFunction(lambda sub: obj.find(sub), 'find')
+            if attr == 'count': return BuiltinFunction(lambda sub: obj.count(sub), 'count')
         if isinstance(obj, dict):
             if attr == 'keys': return BuiltinFunction(lambda: list(obj.keys()), 'keys')
             if attr == 'values': return BuiltinFunction(lambda: list(obj.values()), 'values')
+            if attr == 'get': return BuiltinFunction(lambda key, default=None: obj.get(key, default), 'get')
+            if attr == 'items': return BuiltinFunction(lambda: list(obj.items()), 'items')
             return obj.get(attr, None)
         raise ViGoError(f"Dot access '{attr}' not supported on {type(obj).__name__}")
 
@@ -481,22 +768,6 @@ class Interpreter:
         if not isinstance(cls, ViGoClass): raise ViGoError(f"'{node.class_name}' is not a class")
         return self._call(cls, [self.eval(a, env) for a in node.args], env, cls.name)
 
-    def _try(self, node, env):
-        try:
-            return self.eval_block(node.try_body, env)
-        except ReturnException:
-            raise
-        except ViGoError as e:
-            if node.catch_var:
-                env.variables[node.catch_var] = str(e).replace("ViGo Error: ", "")
-            if node.catch_body:
-                return self.eval_block(node.catch_body, env)
-        except Exception as e:
-            if node.catch_var:
-                env.variables[node.catch_var] = str(e).replace("ViGo Error: ", "")
-            if node.catch_body:
-                return self.eval_block(node.catch_body, env)
-
     def _load(self, node, env):
         fp = node.filepath
         for d in ['.', os.path.dirname(self.source_file) if self.source_file != '<script>' else '.']:
@@ -509,19 +780,6 @@ class Interpreter:
         else:
             for k, v in sub.global_env.variables.items(): env.define(k, v)
         return result
-
-    def eval_block(self, stmts, env):
-        result = None
-        for s in stmts: result = self.eval(s, env)
-        return result
-
-    def is_truthy(self, v):
-        if v is None: return False
-        if isinstance(v, bool): return v
-        if isinstance(v, (int, float)): return v != 0
-        if isinstance(v, str): return v != ''
-        if isinstance(v, (list, tuple, dict, set)): return len(v) > 0
-        return True
 
 
 def run_vigo(source_code, source_file='<script>'):

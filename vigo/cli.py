@@ -299,9 +299,12 @@ def cmd_publish(args):
 
 def main():
     if len(sys.argv) < 2:
-        from .repl import ViGoREPL
-        repl = ViGoREPL()
-        repl.run()
+        try:
+            from .repl import ViGoREPL
+            repl = ViGoREPL()
+            repl.run()
+        except ImportError:
+            print("REPL module not found. Please ensure vigo/repl.py exists.")
         return
 
     command = sys.argv[1].lower()

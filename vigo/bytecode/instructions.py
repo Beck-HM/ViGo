@@ -44,3 +44,15 @@ SET_ATTR = "SET_ATTR"
 
 HALT = "HALT"
 LABEL = "LABEL"
+
+# ── IR-level instructions (for optimization layer) ──
+IR_LOAD_CONST = "IR_LOAD_CONST"
+IR_ADD = "IR_ADD"
+IR_SUB = "IR_SUB"
+IR_MUL = "IR_MUL"
+IR_DIV = "IR_DIV"
+IR_STORE = "IR_STORE"
+IR_LOAD = "IR_LOAD"
+IR_JUMP_IF_FALSE = "IR_JUMP_IF_FALSE"
+IR_CALL = "IR_CALL"
+IR_RETURN = "IR_RETURN"

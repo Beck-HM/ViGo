@@ -4,6 +4,8 @@ import urllib.request, urllib.error
 import os, sqlite3
 from ..runtime.objects import BuiltinFunction
 from ..runtime.errors import ViGoError
+from .providers import PROVIDERS
+from .providers.request import build_url, build_headers, make_request
 
 PROVIDERS = {
     # -- Tier 1: Cloud Providers --
@@ -150,6 +152,8 @@ class AIClient:
         self.provider = "openai"
         self.max_retries = 3
         self.retry_delay = 2.0
+        self.stream_callback = None
+        self.stream_chunks = []
 
     def set_api_key(self, key): self.api_key = key; return self
     def set_base_url(self, url): self.base_url = url; return self
@@ -201,7 +205,7 @@ class AIClient:
             headers["anthropic-version"] = config["api_version"]
         return headers
 
-    def _openai_request(self, messages, model=None, temp=None, max_tokens=None, provider=None):
+    def _openai_request(self, messages, model=None, temp=None, max_tokens=None, provider=None, stream=False):
         model = model or self.default_model
         temp = temp or self.default_temp
         max_tokens = max_tokens or self.default_max_tokens
@@ -220,6 +224,10 @@ class AIClient:
                 "temperature": temp,
                 "max_tokens": max_tokens,
             }
+
+        if stream:
+            body["stream"] = True
+            return self._stream_request(url, headers, body, config["message_format"])
 
         data = json.dumps(body).encode('utf-8')
         last_error = None
@@ -301,24 +309,113 @@ class AIClient:
                 return choices[0].get("message", {}).get("content", "")
             return ""
 
-    def ask(self, prompt, model=None, temp=None, max_tokens=None, provider=None):
+    def _stream_request(self, url, headers, body, message_format):
+        """Handle streaming SSE response, collecting chunks into stream_chunks."""
+        data = json.dumps(body).encode('utf-8')
+        full_text = ""
+        self.stream_chunks = []
+        last_error = None
+        for attempt in range(self.max_retries + 1):
+            try:
+                req = urllib.request.Request(url, data=data, headers=headers)
+                with urllib.request.urlopen(req, timeout=300) as resp:
+                    buffer = ""
+                    while True:
+                        chunk = resp.read(1)
+                        if not chunk:
+                            break
+                        buffer += chunk.decode('utf-8', errors='ignore')
+                        while "\n" in buffer:
+                            line, buffer = buffer.split("\n", 1)
+                            line = line.strip()
+                            if line.startswith("data: "):
+                                json_str = line[6:]
+                                if json_str == "[DONE]":
+                                    break
+                                try:
+                                    obj = json.loads(json_str)
+                                    delta = self._extract_stream_delta(obj, message_format)
+                                    if delta:
+                                        full_text += delta
+                                        self.stream_chunks.append(delta)
+                                except json.JSONDecodeError:
+                                    pass
+                    self.total_tokens += len(full_text) // 4
+                    self.call_count += 1
+
+                    # Fallback: if no chunks parsed, try parsing as complete response
+                    if not full_text and buffer.strip():
+                        try:
+                            obj = json.loads(buffer.strip())
+                            full_text = self._parse_response(obj, message_format)
+                            if full_text:
+                                self.stream_chunks.append(full_text)
+                        except json.JSONDecodeError:
+                            pass
+
+                    return full_text
+            except (urllib.error.URLError, ConnectionResetError, TimeoutError) as e:
+                last_error = e
+                if attempt < self.max_retries:
+                    time.sleep(self.retry_delay * (attempt + 1))
+            except Exception as e:
+                raise ViGoError(f"Stream error: {e}")
+
+        raise ViGoError(f"Stream connection failed after {self.max_retries+1} attempts: {last_error}")
+
+    def _extract_stream_delta(self, obj, message_format):
+        """Extract text delta from a streaming chunk."""
+        if message_format == "claude":
+            delta = obj.get("delta", {})
+            return delta.get("text", "")
+        elif message_format == "cohere":
+            delta = obj.get("delta", {})
+            content = delta.get("content", {})
+            return content.get("text", "")
+        else:
+            choices = obj.get("choices", [])
+            if choices:
+                delta = choices[0].get("delta", {})
+                return delta.get("content", "")
+        return ""
+
+    def set_stream_callback(self, callback):
+        """Register a callback function for streaming chunks."""
+        self.stream_callback = callback
+        return self
+
+    def get_stream_chunks(self):
+        """Return and clear the collected stream chunks."""
+        chunks = self.stream_chunks.copy()
+        self.stream_chunks = []
+        return chunks
+
+    def ask(self, prompt, model=None, temp=None, max_tokens=None, provider=None, stream=False):
         clean_prompt, ok = self._apply_guardrails(prompt, "input")
         if not ok:
             return clean_prompt
 
-        if self.cache_enabled:
+        if self.cache_enabled and not stream:
             key = self._cache_key(clean_prompt, model or self.default_model, provider or self.provider)
             if key in self.cache:
                 return self.cache[key]
 
-        response = self._openai_request(
+        response = make_request(
+            self,
             [{"role": "user", "content": str(clean_prompt)}],
-            model, temp, max_tokens, provider
+            model, temp, max_tokens, stream
         )
+
+        if stream and not response:
+            response = make_request(
+                self,
+                [{"role": "user", "content": str(clean_prompt)}],
+                model, temp, max_tokens, False
+            )
 
         clean_response, ok = self._apply_guardrails(response, "output")
 
-        if self.cache_enabled:
+        if self.cache_enabled and not stream:
             key = self._cache_key(clean_prompt, model or self.default_model, provider or self.provider)
             self.cache[key] = clean_response
 
@@ -339,7 +436,11 @@ class AIClient:
             if key in self.cache:
                 return self.cache[key]
 
-        response = self._openai_request(clean_messages, model, temp, max_tokens, provider)
+        response = make_request(
+            self,
+            clean_messages,
+            model, temp, max_tokens, False
+        )
 
         clean_response, ok = self._apply_guardrails(response, "output")
         if self.cache_enabled and clean_messages:
@@ -494,6 +595,8 @@ class AIAgent:
         self.long_term_memory = []
         self.retry_count = 2
         self._register_builtin_tools()
+        self.stream_callback = None
+        self._stream_callback_raw = None
 
     def _register_builtin_tools(self):
         self.tools["web_search"] = {"func": self._web_search, "desc": "Search the web"}
@@ -629,9 +732,13 @@ _ai = AIClient()
 
 def register(env):
     env.define('ai_ask', BuiltinFunction(
-        lambda p, m=None, t=None, mt=None, prv=None: _ai.ask(p, m, t, mt, prv), 'ai_ask'))
+        lambda p, m=None, t=None, mt=None, prv=None, stream=False: _ai.ask(p, m, t, mt, prv, stream), 'ai_ask'))
     env.define('ai_chat', BuiltinFunction(
         lambda msgs, m=None, t=None, mt=None, prv=None: _ai.chat(msgs, m, t, mt, prv), 'ai_chat'))
+    env.define('ai_on_chunk', BuiltinFunction(
+        lambda callback: _ai.set_stream_callback(callback) and True, 'ai_on_chunk'))
+    env.define('ai_stream_chunks', BuiltinFunction(
+        lambda: _ai.get_stream_chunks(), 'ai_stream_chunks'))
 
     env.define('ai_ollama', BuiltinFunction(
         lambda p, m="llama3", h="http://localhost:11434": _ai.ollama(p, m, h), 'ai_ollama'))
@@ -664,23 +771,6 @@ def register(env):
 
     env.define('ai_describe_image', BuiltinFunction(
         lambda path, model="llava", host="http://localhost:11434": _ai.describe_image(path, model, host), 'ai_describe_image'))
-
-    def _create_agent(model="gemma-4b", max_steps=5, verbose=False, provider="ollama"):
-        return AIAgent(model, max_steps, verbose, provider)
-
-    def _agent_add_tool(agent, name, func, desc):
-        if isinstance(agent, AIAgent):
-            agent.add_tool(name, func, desc)
-            return agent
-
-    def _agent_run(agent, task):
-        if isinstance(agent, AIAgent):
-            return agent.run(task)
-        return "Invalid agent"
-
-    env.define('ai_agent', BuiltinFunction(_create_agent, 'ai_agent'))
-    env.define('ai_agent_add_tool', BuiltinFunction(_agent_add_tool, 'ai_agent_add_tool'))
-    env.define('ai_agent_run', BuiltinFunction(_agent_run, 'ai_agent_run'))
 
     def _create_agent(model="gemma-4b", max_steps=5, verbose=False, provider="ollama"):
         return AIAgent(model, max_steps, verbose, provider)

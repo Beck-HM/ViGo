@@ -527,3 +527,51 @@ def transpile_file(filepath):
         with open(filepath, "r", encoding="gbk") as f:
             source = f.read()
     return transpile(source)
+
+def transpile_ir(source_code):
+    """Transpile via IR: AST → IR → optimized IR → Python source."""
+    from ..lexer.lexer import Lexer
+    from ..parser.parser import Parser
+    from ..ir import IRBuilder, IROptimizer
+
+    lexer = Lexer(source_code)
+    parser = Parser(lexer)
+    ast = parser.parse_program()
+    builder = IRBuilder()
+    ir = builder.build(ast)
+    optimizer = IROptimizer()
+    ir = optimizer.optimize(ir)
+
+    return _ir_to_python(ir)
+
+
+def _ir_to_python(instructions):
+    """Convert optimized IR back to Python source code."""
+    lines = []
+    temps = {}
+
+    for inst in instructions:
+        if inst.opcode == IR_LOAD_CONST:
+            val = inst.operands[0] if inst.operands else None
+            if inst.result and inst.result.startswith('t'):
+                temps[inst.result] = repr(val) if isinstance(val, str) else str(val)
+            else:
+                lines.append(f"{inst.result} = {repr(val)}")
+
+        elif inst.opcode in (IR_ADD, IR_SUB, IR_MUL, IR_DIV):
+            left = temps.get(inst.operands[0], inst.operands[0])
+            right = temps.get(inst.operands[1], inst.operands[1])
+            op_map = {IR_ADD: '+', IR_SUB: '-', IR_MUL: '*', IR_DIV: '/'}
+            op = op_map.get(inst.opcode, '+')
+            expr = f"{left} {op} {right}"
+            if inst.result and inst.result.startswith('t'):
+                temps[inst.result] = f"({expr})"
+            else:
+                lines.append(f"{inst.result} = {expr}")
+
+        elif inst.opcode == IR_STORE:
+            var = inst.operands[0]
+            val = temps.get(inst.operands[1], inst.operands[1])
+            lines.append(f"{var} = {val}")
+
+    return "\n".join(lines)

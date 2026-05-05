@@ -48,7 +48,10 @@ print(result)
 
 ## Changelog
 
-### v3.6 (Stable Beta) — 2026-05-04
+### v3.7 (Beta)
+See [RM3.md](RM3.md) for the full v3.7 release notes.
+
+### v3.6 (Stable Beta)
 
 See [RM3.md](RM3.md) for the full v3.6 release notes.
 

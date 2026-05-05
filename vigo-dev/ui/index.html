@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ViGo Dev</title>
+    <link rel="stylesheet" data-name="vs/editor/editor.main" href="https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs/editor/editor.main.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', 'Consolas', monospace; background: #0d1117; color: #c9d1d9; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+        #menubar { display: flex; align-items: center; background: #161b22; border-bottom: 1px solid #30363d; height: 32px; flex-shrink: 0; padding: 0 8px; gap: 2px; }
+        .menu-item { padding: 4px 10px; font-size: 12px; cursor: pointer; color: #c9d1d9; border-radius: 4px; position: relative; user-select: none; }
+        .menu-item:hover { background: #30363d; }
+        .menu-dropdown { display: none; position: absolute; top: 100%; left: 0; background: #1c2128; border: 1px solid #30363d; border-radius: 6px; min-width: 200px; z-index: 1000; padding: 4px 0; }
+        .menu-dropdown-item { padding: 6px 14px; font-size: 12px; cursor: pointer; color: #c9d1d9; white-space: nowrap; }
+        .menu-dropdown-item:hover { background: #1f6feb44; }
+        .menu-separator { height: 1px; background: #30363d; margin: 4px 8px; }
+        .menu-dropdown-item.disabled { color: #484f58; cursor: default; }
+        .menu-dropdown-item.disabled:hover { background: transparent; }
+        .menu-right { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+        .menu-right button { background: #21262d; color: #c9d1d9; border: 1px solid #30363d; border-radius: 4px; padding: 2px 10px; font-size: 11px; cursor: pointer; }
+        .menu-right button:hover { background: #30363d; }
+        #toolbar { display: flex; align-items: center; padding: 6px 12px; background: #161b22; border-bottom: 1px solid #30363d; height: 36px; flex-shrink: 0; gap: 10px; }
+        .logo { font-size: 15px; font-weight: bold; color: #58a6ff; }
+        #project-name { font-size: 12px; color: #8b949e; }
+        #project-name.active { color: #7ee787; }
+        #main-container { display: flex; flex: 1; overflow: hidden; min-height: 0; }
+        #sidebar { width: 240px; min-width: 200px; background: #161b22; border-right: 1px solid #30363d; display: flex; flex-direction: column; overflow: hidden; }
+        .panel-header { padding: 10px 14px; font-size: 13px; font-weight: 600; color: #8b949e; border-bottom: 1px solid #30363d; flex-shrink: 0; }
+        #file-tree { flex: 1; overflow-y: auto; padding: 6px 0; }
+        .tree-item { padding: 5px 16px; cursor: pointer; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; user-select: none; }
+        .tree-item:hover { background: #1f2937; }
+        .tree-item.dir { color: #8b949e; font-weight: 500; }
+        .tree-item.file { color: #c9d1d9; }
+        .tree-item.file.py { color: #7ee787; }
+        .tree-item.file.vigo { color: #58a6ff; }
+        .tree-item.file.json { color: #d2a8ff; }
+        .tree-item.file.md, .tree-item.file.txt { color: #f0f6fc; }
+        .tree-children { padding-left: 12px; }
+        #editor-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+        #editor-tabs { display: flex; background: #161b22; border-bottom: 1px solid #30363d; padding: 0 10px; height: 34px; flex-shrink: 0; align-items: center; }
+        .tab { padding: 6px 14px; font-size: 12px; cursor: pointer; color: #8b949e; border-bottom: 2px solid transparent; }
+        .tab.active { color: #c9d1d9; border-bottom: 2px solid #58a6ff; }
+        #editor { flex: 1; min-height: 0; }
+        #terminal { background: #0d1117; border-top: 1px solid #30363d; min-height: 100px; max-height: 40%; display: flex; flex-direction: column; }
+        #terminal-header { display: flex; justify-content: space-between; padding: 6px 12px; background: #161b22; font-size: 12px; color: #8b949e; flex-shrink: 0; }
+        #terminal-output { flex: 1; overflow-y: auto; padding: 8px 12px; font-family: 'Consolas', monospace; font-size: 12px; color: #c9d1d9; white-space: pre-wrap; }
+        #chat-panel { width: 360px; min-width: 300px; background: #161b22; border-left: 1px solid #30363d; display: flex; flex-direction: column; overflow: hidden; }
+        #chat-messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+        .message { padding: 10px 12px; border-radius: 8px; font-size: 13px; line-height: 1.5; max-width: 95%; word-wrap: break-word; user-select: text; cursor: text; }
+        .message.user { background: #1f6feb33; align-self: flex-end; border: 1px solid #1f6feb55; }
+        .message.ai { background: #21262d; align-self: flex-start; border: 1px solid #30363d; }
+        .message.ai pre { background: #0d1117; padding: 10px 14px; border-radius: 6px; margin: 6px 0; overflow-x: auto; font-size: 12px; border: 1px solid #30363d; }
+        .message.ai code { font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; }
+        #chat-input-area { padding: 10px; border-top: 1px solid #30363d; display: flex; gap: 8px; flex-shrink: 0; }
+        #chat-input { flex: 1; background: #0d1117; color: #c9d1d9; border: 1px solid #30363d; border-radius: 6px; padding: 8px 12px; font-size: 13px; resize: none; font-family: 'Segoe UI', sans-serif; min-height: 40px; }
+        #chat-input:focus { outline: none; border-color: #58a6ff; }
+        #btn-send { background: #238636; color: white; border: none; border-radius: 6px; padding: 10px 18px; font-size: 13px; cursor: pointer; font-weight: 600; white-space: nowrap; }
+        #btn-send:hover { background: #2ea043; }
+        #btn-send:disabled { background: #21262d; color: #484f58; cursor: not-allowed; }
+        #status-bar { display: flex; justify-content: space-between; padding: 4px 14px; background: #161b22; border-top: 1px solid #30363d; font-size: 11px; color: #8b949e; height: 24px; flex-shrink: 0; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0d1117; }
+        ::-webkit-scrollbar-thumb { background: #30363d; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #484f58; }
+    </style>
+</head>
+<body>
+    <div id="menubar">
+        <div class="menu-item" onclick="toggleMenu('project-dropdown')">📁 Project
+            <div class="menu-dropdown" id="project-dropdown">
+                <div class="menu-dropdown-item" onclick="event.stopPropagation();importProject()">📂 Open Project...</div>
+                <div class="menu-dropdown-item" onclick="event.stopPropagation();createNewProject()">➕ New Project...</div>
+                <div class="menu-separator"></div>
+                <div id="project-list-dropdown"></div>
+                <div class="menu-separator"></div>
+                <div class="menu-dropdown-item" onclick="event.stopPropagation();closeProject()">✖ Close Project</div>
+            </div>
+        </div>
+        <div class="menu-item" onclick="toggleMenu('model-dropdown')">🤖 Model
+            <div class="menu-dropdown" id="model-dropdown">
+                <div id="model-dropdown-list"><div class="menu-dropdown-item disabled">Loading...</div></div>
+            </div>
+        </div>
+        <div class="menu-right">
+            <button onclick="saveCurrentFile()">💾 Save</button>
+            <button onclick="runCurrentFile()">▶️ Run</button>
+            <button onclick="runTests()">🧪 Test</button>
+            <button onclick="showMemory()">🧠 Memory</button>
+        </div>
+    </div>
+    <div id="toolbar">
+        <span class="logo">⚡ ViGo Dev</span>
+        <span id="project-name" class="">No project open</span>
+    </div>
+    <div id="main-container">
+        <div id="sidebar">
+            <div class="panel-header">📁 Files</div>
+            <div id="file-tree"><div class="tree-item" style="color:#8b949e">Open a project to browse files</div></div>
+        </div>
+        <div id="editor-container">
+            <div id="editor-tabs"><span id="tab-label" class="tab active">Welcome</span></div>
+            <div id="editor"></div>
+            <div id="terminal" style="display:none">
+                <div id="terminal-header"><span>💻 Terminal</span><span onclick="toggleTerminal()" style="cursor:pointer;color:#8b949e">✖</span></div>
+                <div id="terminal-output"></div>
+            </div>
+        </div>
+        <div id="chat-panel">
+            <div class="panel-header">💬 AI Assistant</div>
+            <div id="chat-messages"></div>
+            <div id="chat-input-area">
+                <textarea id="chat-input" placeholder="Ask about the code..." rows="2"></textarea>
+                <button id="btn-send">Send</button>
+            </div>
+        </div>
+    </div>
+    <div id="status-bar">
+        <span id="status-file">No file open</span>
+        <span id="status-model">Model: gemma-4b</span>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs/loader.js"></script>
+    <script>
+function toggleMenu(id) { var el = document.getElementById(id); if (!el) return; document.querySelectorAll('.menu-dropdown').forEach(function(d) { if (d.id !== id) d.style.display = 'none'; }); el.style.display = el.style.display === 'block' ? 'none' : 'block'; }
+document.addEventListener('click', function(e) { if (!e.target.closest('.menu-item')) { document.querySelectorAll('.menu-dropdown').forEach(function(d) { d.style.display = 'none'; }); } });
+
+function waitForPywebview(cb) { if (window.pywebview && window.pywebview.api) cb(); else setTimeout(function() { waitForPywebview(cb); }, 100); }
+let editor, ctxPath = '', ctxIsDir = false;
+
+require.config({ paths: { vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs' } });
+require(['vs/editor/editor.main'], function () {
+    monaco.languages.register({ id: 'vigo' });
+    monaco.languages.setMonarchTokensProvider('vigo', { keywords: ['Fun','as','Ret','if','el','eif','ts','Fin','loop','for','in','go','skip','break','continue','load','and','or','not','null','true','false','ok','no','class','new','extends','this','try','catch','throw','await','switch','case','default','enum','const','sure','static','abstract','interface'], typeKeywords: ['int','float','str','bool','list','dict','set'], operators: ['+','-','*','/','%','==','!=','<','>','<=','>=','=','+=','-=','*=','/=','%=','|>','?.','??','..','...','?',':','&','|','^','~','<<','>>'], symbols: /[=><!~?:&|+\-*\/\^%]+/, tokenizer: { root: [[/\b\d+\.?\d*\b/,'number'],[/[a-zA-Z_]\w*/,{cases:{'@typeKeywords':'type','@keywords':'keyword','@default':'identifier'}}],[/"/,{token:'string.quote',bracket:'@open',next:'@string'}],[/#.*$/,'comment'],[/[{}()\[\]]/,'@brackets']], string: [[/[^\\"]+/,'string'],[/"/,{token:'string.quote',bracket:'@close',next:'@pop'}]] } });
+    monaco.languages.registerCompletionItemProvider('vigo', { provideCompletionItems: function(model, pos) { var w = model.getWordUntilPosition(pos), r = { startLineNumber: pos.lineNumber, endLineNumber: pos.lineNumber, startColumn: w.startColumn, endColumn: w.endColumn }; return { suggestions: [{ label:'Fun as',kind:14,insertText:'Fun as ${1:name}(${2:params}):\n    ${3}\nFin',insertTextRules:4,range:r},{ label:'if',kind:14,insertText:'if ${1:condition} ts\n    ${2}\nFin',insertTextRules:4,range:r},{ label:'loop',kind:14,insertText:'loop ${1:condition} ts\n    ${2}\nFin',insertTextRules:4,range:r},{ label:'for',kind:14,insertText:'for ${1:item} in ${2:items} ts\n    ${3}\nFin',insertTextRules:4,range:r},{ label:'switch',kind:14,insertText:'switch ${1:expr} ts\n    case ${2:val} ts\n        ${3}\n    default ts\n        ${4}\nFin',insertTextRules:4,range:r},{ label:'class',kind:14,insertText:'class ${1:Name} ts\n    ${2}\nFin',insertTextRules:4,range:r},{ label:'try',kind:14,insertText:'try ts\n    ${1}\ncatch ${2:err} ts\n    ${3}\nFin',insertTextRules:4,range:r},{ label:'Ret',kind:14,insertText:'Ret ${1:expr}',insertTextRules:4,range:r},{ label:'const',kind:14,insertText:'const ${1:NAME} = ${2:value}',insertTextRules:4,range:r},{ label:'ok',kind:13,insertText:'ok',range:r},{ label:'no',kind:13,insertText:'no',range:r},{ label:'null',kind:13,insertText:'null',range:r},{ label:'ai_ask',kind:1,insertText:'ai_ask("${1:prompt}")',insertTextRules:4,range:r},{ label:'mem_save',kind:1,insertText:'mem_save("${1:key}","${2:content}")',insertTextRules:4,range:r},{ label:'print',kind:1,insertText:'print(${1})',insertTextRules:4,range:r}] }; }});
+    monaco.languages.setLanguageConfiguration('vigo', { brackets:[['{','}'],['[',']'],['(',')']], autoClosingPairs:[{open:'{',close:'}'},{open:'[',close:']'},{open:'(',close:')'},{open:'"',close:'"'}], surroundingPairs:[{open:'{',close:'}'},{open:'[',close:']'},{open:'(',close:')'},{open:'"',close:'"'}] });
+    editor = monaco.editor.create(document.getElementById('editor'), { value:'// Welcome to ViGo Dev\n// Open a project to start editing.', language:'vigo', theme:'vs-dark', fontSize:13, minimap:{enabled:false}, automaticLayout:true, scrollBeyondLastLine:false, wordWrap:'on' });
+    waitForPywebview(function() { initApp(); });
+});
+
+async function initApp() { await loadModels(); await loadProjects(); }
+
+async function loadProjects() { try { var d = JSON.parse(await pywebview.api.list_projects()), projects = d.projects || [], current = d.current; var dd = document.getElementById('project-list-dropdown'); dd.innerHTML = ''; projects.forEach(function(p) { var div = document.createElement('div'); div.className = 'menu-dropdown-item'; div.textContent = '📁 ' + p.name; div.onclick = function(e) { e.stopPropagation(); openProject(p.name); }; dd.appendChild(div); }); var el = document.getElementById('project-name'); if (current) { el.textContent = '📁 ' + current; el.className = 'active'; loadFileTree(); } else { el.textContent = 'No project open'; el.className = ''; } } catch(e) { console.error(e); } }
+async function createNewProject() { var name = prompt('Enter new project name:'); if (!name || !name.trim()) return; try { var r = JSON.parse(await pywebview.api.create_project(name.trim())); if (r.status === 'ok') { await loadProjects(); loadFileTree(); if (r.last_file) openFile(r.last_file, r.last_file.split('/').pop()); } else alert('Error: ' + (r.message || 'Failed')); } catch(e) { alert('Error: ' + e.message); } }
+async function importProject() { try { var folder = await pywebview.api.open_folder_dialog(); if (!folder) return; var name = folder.split('\\').pop().split('/').pop(); name = prompt('Project name:', name); if (!name || !name.trim()) return; var r = JSON.parse(await pywebview.api.import_project(name.trim(), folder)); if (r.status === 'ok') { await loadProjects(); loadFileTree(); if (r.last_file) openFile(r.last_file, r.last_file.split('/').pop()); } else alert('Error: ' + (r.message || 'Failed')); } catch(e) { alert('Error: ' + e.message); } }
+async function openProject(name) { try { var r = JSON.parse(await pywebview.api.open_project(name)); if (r.status === 'ok') { await loadProjects(); loadFileTree(); if (r.last_file) openFile(r.last_file, r.last_file.split('/').pop()); } } catch(e) { alert('Error: ' + e.message); } }
+async function closeProject() { await pywebview.api.close_project(); await loadProjects(); document.getElementById('file-tree').innerHTML = '<div class="tree-item" style="color:#8b949e">Open a project to browse files</div>'; editor.setValue('// Welcome to ViGo Dev'); document.getElementById('tab-label').textContent = 'Welcome'; document.getElementById('status-file').textContent = 'No file open'; }
+
+async function loadFileTree() { try { var tree = JSON.parse(await pywebview.api.get_file_tree()), c = document.getElementById('file-tree'); if (tree.length === 0) { c.innerHTML = '<div class="tree-item" style="color:#8b949e">Project is empty</div>'; return; } renderTree(tree, c); } catch(e) { c.innerHTML = '<div class="tree-item" style="color:#f85149">Error: ' + e.message + '</div>'; } }
+function renderTree(items, container, depth) { depth = depth || 0; container.innerHTML = ''; items.forEach(function(item) { var div = document.createElement('div'); div.className = 'tree-item ' + item.type + (item.type === 'file' ? ' ' + (item.ext||'').replace('.','') : ''); div.style.paddingLeft = (14 + depth * 14) + 'px'; div.textContent = (item.type === 'dir' ? '📁' : '📄') + ' ' + item.name; div.setAttribute('data-path', item.path); div.addEventListener('contextmenu', function(e) { e.preventDefault(); e.stopPropagation(); ctxPath = item.path; ctxIsDir = item.type === 'dir'; showCtxMenu(e.clientX, e.clientY, ctxIsDir); }); if (item.type === 'file') { div.onclick = function() { openFile(item.path, item.name); }; container.appendChild(div); } else { div.onclick = async function(e) { e.stopPropagation(); var cd = this.nextElementSibling; if (cd && cd.classList.contains('tree-children')) { cd.style.display = cd.style.display === 'none' ? 'block' : 'none'; } else { try { var children = JSON.parse(await pywebview.api.get_dir_children(item.path)); var cc = document.createElement('div'); cc.className = 'tree-children'; renderTree(children, cc, depth + 1); container.insertBefore(cc, this.nextSibling); } catch(e) { console.error(e); } } }; container.appendChild(div); } }); }
+var ctxMenu = document.createElement('div'); ctxMenu.id = 'ctx-menu'; ctxMenu.style.cssText = 'display:none;position:fixed;background:#1c2128;border:1px solid #30363d;border-radius:6px;padding:4px 0;z-index:2000;min-width:160px;'; document.body.appendChild(ctxMenu); document.addEventListener('click', function() { ctxMenu.style.display = 'none'; });
+function ctxItem(text, fn) { var d = document.createElement('div'); d.className = 'menu-dropdown-item'; d.textContent = text; d.onclick = fn; return d; }
+function showCtxMenu(x, y, isDir) { ctxMenu.innerHTML = ''; if (isDir) { ctxMenu.appendChild(ctxItem('📄 New File', async function() { var n = prompt('File name:'); if (n) { await pywebview.api.create_file(ctxPath, n); loadFileTree(); } })); ctxMenu.appendChild(ctxItem('📁 New Folder', async function() { var n = prompt('Folder name:'); if (n) { await pywebview.api.create_folder(ctxPath, n); loadFileTree(); } })); } ctxMenu.appendChild(ctxItem('✏️ Rename', async function() { var oldName = ctxPath.split('/').pop(); var baseName = oldName.indexOf('.') !== -1 ? oldName.substring(0, oldName.lastIndexOf('.')) : oldName; var n = prompt('New name (extension preserved):', baseName); if (n) { var r = JSON.parse(await pywebview.api.rename_item(ctxPath, n)); if (r.status === 'ok') { loadFileTree(); if (r.new_path) openFile(r.new_path, r.new_name); } else alert(r.message); } })); ctxMenu.appendChild(ctxItem('🗑️ Delete', async function() { if (confirm('Delete "' + ctxPath + '"?')) { var r = JSON.parse(await pywebview.api.delete_item(ctxPath)); if (r.status === 'ok') loadFileTree(); else alert(r.message); } })); ctxMenu.style.display = 'block'; ctxMenu.style.left = x + 'px'; ctxMenu.style.top = y + 'px'; }
+document.getElementById('file-tree').addEventListener('contextmenu', function(e) { e.preventDefault(); ctxPath = ''; ctxIsDir = true; showCtxMenu(e.clientX, e.clientY, true); });
+async function openFile(path, name) { try { var content = await pywebview.api.read_file(path); editor.setValue(content); var ext = path.split('.').pop(), m = { py:'python', vigo:'vigo', js:'javascript', html:'html', css:'css', json:'json', md:'markdown' }; monaco.editor.setModelLanguage(editor.getModel(), m[ext] || 'plaintext'); document.getElementById('tab-label').textContent = name; document.getElementById('status-file').textContent = path; } catch(e) { console.error(e); } }
+async function saveCurrentFile() { try { var cf = await pywebview.api.get_current_file(); if (cf) { await pywebview.api.save_file(cf, editor.getValue()); } } catch(e) { console.error(e); } }
+document.addEventListener('keydown', function(e) { if ((e.ctrlKey||e.metaKey) && e.key === 's') { e.preventDefault(); saveCurrentFile(); } });
+
+async function loadModels() { try { var models = JSON.parse(await pywebview.api.list_models()), dd = document.getElementById('model-dropdown-list'); dd.innerHTML = ''; if (models.length === 0) { dd.innerHTML = '<div class="menu-dropdown-item disabled">No models</div>'; return; } var local = models.filter(function(m) { return m.source === 'local'; }), cloud = models.filter(function(m) { return m.source === 'cloud'; }); if (local.length) { dd.appendChild(sep('🖥️ Local (Ollama)')); local.forEach(function(m) { dd.appendChild(mi(m)); }); } if (cloud.length) { dd.appendChild(sep('☁️ Cloud')); cloud.forEach(function(m) { dd.appendChild(mi(m)); }); } } catch(e) { console.error(e); } }
+function sep(t) { var d = document.createElement('div'); d.className = 'menu-dropdown-item disabled'; d.textContent = t; return d; }
+function mi(m) { var d = document.createElement('div'); d.className = 'menu-dropdown-item'; d.textContent = '  ' + (m.name||m.id); d.onclick = function(e) { e.stopPropagation(); selectModel(m.id, m.provider); }; return d; }
+async function selectModel(id, provider) { await pywebview.api.set_model(id, provider); document.getElementById('status-model').textContent = 'Model: ' + id; }
+
+function escapeHtml(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function appendMessage(role, text) { var c = document.getElementById('chat-messages'), div = document.createElement('div'); div.className = 'message ' + role; if (text.indexOf('```') !== -1) { var h = ''; text.split('```').forEach(function(p,i) { if (i%2===1) h += '<pre><code>' + escapeHtml(p) + '</code></pre>'; else h += escapeHtml(p); }); div.innerHTML = h; } else { div.textContent = text; } var copyBtn = document.createElement('div'); copyBtn.textContent = '📋 Copy'; copyBtn.style.cssText = 'margin-top:6px;font-size:11px;color:#8b949e;cursor:pointer;text-align:right;'; copyBtn.onclick = function() { pywebview.api.copy_to_clipboard(text).then(function() { copyBtn.textContent = '✅ Copied!'; setTimeout(function() { copyBtn.textContent = '📋 Copy'; }, 1500); }); }; div.appendChild(copyBtn); c.appendChild(div); c.scrollTop = c.scrollHeight; }
+
+async function sendMessage() { var input = document.getElementById('chat-input'), msg = input.value.trim(); if (!msg) return; appendMessage('user', msg); input.value = ''; document.getElementById('btn-send').disabled = true; try { var r = JSON.parse(await pywebview.api.ask_ai(msg)); if (r.status === 'ok') { if (r.chunks && r.chunks.length > 0) { appendMessageStream('ai', r.chunks, r.response, r.elapsed); } else { appendMessage('ai', r.response + '\n\n⏱️ ' + r.elapsed + 's'); } pywebview.api.mem_save('chat_'+Date.now(), 'User: '+msg+'\nAI: '+r.response); } else { appendMessage('ai', 'Error: ' + (r.response||'Unknown')); } } catch(e) { appendMessage('ai', 'Error: ' + e.message); } document.getElementById('btn-send').disabled = false; }
+function appendMessageStream(role, chunks, fullText, elapsed) { var c = document.getElementById('chat-messages'), div = document.createElement('div'); div.className = 'message ' + role; var span = document.createElement('span'); div.appendChild(span); c.appendChild(div); c.scrollTop = c.scrollHeight; var i = 0; function showNext() { if (i < chunks.length) { span.textContent += chunks[i]; c.scrollTop = c.scrollHeight; i++; setTimeout(showNext, 15); } else { span.remove(); if (fullText.indexOf('```') !== -1) { var h = ''; fullText.split('```').forEach(function(p,j) { if (j%2===1) h += '<pre><code>' + escapeHtml(p) + '</code></pre>'; else h += escapeHtml(p); }); div.innerHTML = h; } else { div.textContent = fullText; } var timeSpan = document.createElement('div'); timeSpan.textContent = '⏱️ ' + elapsed + 's'; timeSpan.style.cssText = 'margin-top:4px;font-size:10px;color:#484f58;text-align:right;'; div.appendChild(timeSpan); var copyBtn = document.createElement('div'); copyBtn.textContent = '📋 Copy'; copyBtn.style.cssText = 'margin-top:4px;font-size:11px;color:#8b949e;cursor:pointer;text-align:right;'; copyBtn.onclick = function() { pywebview.api.copy_to_clipboard(fullText).then(function() { copyBtn.textContent = '✅ Copied!'; setTimeout(function() { copyBtn.textContent = '📋 Copy'; }, 1500); }); }; div.appendChild(copyBtn); c.scrollTop = c.scrollHeight; } } showNext(); }
+
+document.getElementById('btn-send').onclick = sendMessage;
+document.getElementById('chat-input').onkeydown = function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
+
+async function runCurrentFile() { var cf = await pywebview.api.get_current_file(); if (!cf) { appendTerminal('No file open.'); return; } if (!cf.endsWith('.vigo')) { appendTerminal('Only .vigo files can be run.'); return; } appendTerminal('▶️ Running: ' + cf + '\n'); var r = JSON.parse(await pywebview.api.run_vigo_file(cf)); appendTerminal(r.output + '\n' + (r.status === 'ok' ? '✅ Done.' : '❌ Failed.')); }
+function appendTerminal(text) { var t = document.getElementById('terminal'); t.style.display = 'flex'; var o = document.getElementById('terminal-output'); o.textContent += text + '\n'; o.scrollTop = o.scrollHeight; }
+function toggleTerminal() { var t = document.getElementById('terminal'); t.style.display = t.style.display === 'none' ? 'flex' : 'none'; }
+document.addEventListener('keydown', function(e) { if (e.key === 'F5') { e.preventDefault(); runCurrentFile(); } });
+
+async function runTests() { appendMessage('ai','🧪 Running tests...'); try { var r = JSON.parse(await pywebview.api.run_test()); appendMessage('ai', (r.status==='ok'?'✅ Tests passed!\n'+r.stdout:'❌ Tests failed!\n'+r.stdout)); } catch(e) { appendMessage('ai','Error: '+e.message); } }
+async function showMemory() { try { var s = JSON.parse(await pywebview.api.mem_snapshot()); appendMessage('ai','🧠 Memory: '+s.total+' items\nOldest: '+(s.oldest||'N/A')+'\nNewest: '+(s.newest||'N/A')); } catch(e) { appendMessage('ai','Error: '+e.message); } }
+async function updateStatusBar() { try { var cf = await pywebview.api.get_current_file(); document.getElementById('status-file').textContent = cf || 'No file open'; } catch(e) {} }
+</script>
+</body>
+</html>

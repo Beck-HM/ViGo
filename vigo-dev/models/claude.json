@@ -1,0 +1,6 @@
+{
+    "id": "claude-3-haiku-20240307",
+    "name": "Claude 3 Haiku",
+    "provider": "claude",
+    "description": "Anthropic Claude 3 Haiku - fast"
+}

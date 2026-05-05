@@ -1,0 +1,62 @@
+# ============================================
+#   Memory Library - TF-IDF Ranking Test
+# ============================================
+
+print("=== Memory TF-IDF Ranking Test ===")
+print("")
+
+# Clean slate
+mem_clear()
+
+# Insert test data
+mem_set("apple", "A sweet red fruit that grows on trees")
+mem_set("banana", "A yellow tropical fruit rich in potassium")
+mem_set("car", "A motor vehicle with four wheels and an engine")
+mem_set("python_code", "def hello(): print('Hello World')")
+mem_set("python_lang", "Python is a programming language used for AI and data science")
+
+# Test 1: "fruit" should rank apple and banana first
+print("Search: fruit")
+results = mem_search("fruit", 5)
+i = 0
+loop i < len(results) ts
+    print("  " + str(i) + ": " + results[i]["key"] + " | " + results[i]["value"])
+    i = i + 1
+Fin
+
+print("")
+if len(results) >= 2 ts
+    first_keys = results[0]["key"] + results[1]["key"]
+    if first_keys == "applebanana" or first_keys == "bananaapple" ts
+        print("PASS: fruit search ranks apple and banana first")
+    el ts
+        print("FAIL: expected apple/banana first, got " + results[0]["key"] + " and " + results[1]["key"])
+    Fin
+el ts
+    print("FAIL: not enough results")
+Fin
+
+# Test 2: "python" should rank python_lang and python_code first
+print("")
+print("Search: python")
+results2 = mem_search("python", 5)
+j = 0
+loop j < len(results2) ts
+    print("  " + str(j) + ": " + results2[j]["key"] + " | " + results2[j]["value"])
+    j = j + 1
+Fin
+
+print("")
+if len(results2) >= 2 ts
+    first_two = results2[0]["key"] + results2[1]["key"]
+    if first_two == "python_codepython_lang" or first_two == "python_langpython_code" ts
+        print("PASS: python search ranks python_* first")
+    el ts
+        print("FAIL: expected python_* first, got " + results2[0]["key"] + " and " + results2[1]["key"])
+    Fin
+el ts
+    print("FAIL: not enough results")
+Fin
+
+# Clean up
+mem_clear()

@@ -403,14 +403,14 @@ class AIClient:
         response = make_request(
             self,
             [{"role": "user", "content": str(clean_prompt)}],
-            model, temp, max_tokens, stream
+            model, temp, max_tokens, stream, provider
         )
 
         if stream and not response:
             response = make_request(
                 self,
                 [{"role": "user", "content": str(clean_prompt)}],
-                model, temp, max_tokens, False
+                model, temp, max_tokens, False, provider
             )
 
         clean_response, ok = self._apply_guardrails(response, "output")

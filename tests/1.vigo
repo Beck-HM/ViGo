@@ -1,0 +1,146 @@
+Fun as main():
+    print("ViGo v3.7 Regression - Deep Verification Tests")
+    print("")
+
+    # ═══════════════════════════════════════
+    #  Test X1: Skip/Unless loop - original
+    # ═══════════════════════════════════════
+
+    x1 = ok
+    try ts
+        i = 0
+        skip i >= 3 ts
+            i = i + 1
+        Fin
+        print("  X1: i = " + str(i))
+        x1 = i == 3 ? ok : no
+    catch err ts
+        x1 = no
+        print("  X1 FAILED: " + str(err))
+    Fin
+    if x1 ts print("[PASS] X1: Skip loop with condition i >= 3")
+    el ts print("[FAIL] X1: Skip loop with condition i >= 3") Fin
+
+    # ═══════════════════════════════════════
+    #  Test X2: Skip/Unless loop - minimal
+    # ═══════════════════════════════════════
+
+    x2 = ok
+    try ts
+        j = 0
+        skip j >= 5 ts
+            j = j + 2
+        Fin
+        print("  X2: j = " + str(j))
+        x2 = j == 6 ? ok : no
+    catch err ts
+        x2 = no
+        print("  X2 FAILED: " + str(err))
+    Fin
+    if x2 ts print("[PASS] X2: Skip loop with step 2")
+    el ts print("[FAIL] X2: Skip loop with step 2") Fin
+
+    # ═══════════════════════════════════════
+    #  Test X3: Spread/expand - single element
+    # ═══════════════════════════════════════
+
+    x3 = ok
+    try ts
+        base = [2]
+        combined = [1, ...base, 3]
+        print("  X3: combined = " + str(combined))
+        print("  X3: len = " + str(len(combined)))
+        x3 = len(combined) == 3 and combined[0] == 1 and combined[2] == 3 ? ok : no
+    catch err ts
+        x3 = no
+        print("  X3 FAILED: " + str(err))
+    Fin
+    if x3 ts print("[PASS] X3: Spread single element [1, ...[2], 3]")
+    el ts print("[FAIL] X3: Spread single element") Fin
+
+    # ═══════════════════════════════════════
+    #  Test X4: Spread/expand - multi element
+    # ═══════════════════════════════════════
+
+    x4 = ok
+    try ts
+        base = [10, 20, 30]
+        combined = [5, ...base, 40]
+        print("  X4: combined = " + str(combined))
+        print("  X4: len = " + str(len(combined)))
+        x4 = len(combined) == 5 ? ok : no
+    catch err ts
+        x4 = no
+        print("  X4 FAILED: " + str(err))
+    Fin
+    if x4 ts print("[PASS] X4: Spread multi element [5, ...[10,20,30], 40]")
+    el ts print("[FAIL] X4: Spread multi element") Fin
+
+    # ═══════════════════════════════════════
+    #  Test X5: Enum - individual members
+    # ═══════════════════════════════════════
+
+    x5 = ok
+    try ts
+        enum Color ts
+            Red
+            Green
+            Blue = 5
+            Yellow
+        Fin
+        r = Color.Red
+        g = Color.Green
+        b = Color.Blue
+        y = Color.Yellow
+        print("  X5: Red=" + str(r) + " Green=" + str(g) + " Blue=" + str(b) + " Yellow=" + str(y))
+        x5 = r == 0 and g == 1 and b == 5 and y == 6 ? ok : no
+    catch err ts
+        x5 = no
+        print("  X5 FAILED: " + str(err))
+    Fin
+    if x5 ts print("[PASS] X5: Enum all member values")
+    el ts print("[FAIL] X5: Enum all member values") Fin
+
+    # ═══════════════════════════════════════
+    #  Test X6: Enum - and chain
+    # ═══════════════════════════════════════
+
+    x6 = ok
+    try ts
+        enum Status ts
+            Pending
+            Active
+            Done
+        Fin
+        result = Status.Pending == 0 and Status.Active == 1 and Status.Done == 2
+        print("  X6: result = " + str(result))
+        x6 = result ? ok : no
+    catch err ts
+        x6 = no
+        print("  X6 FAILED: " + str(err))
+    Fin
+    if x6 ts print("[PASS] X6: Enum with and chain")
+    el ts print("[FAIL] X6: Enum with and chain") Fin
+
+    # ═══════════════════════════════════════
+    #  Summary
+    # ═══════════════════════════════════════
+
+    print("")
+    print("--- Deep Verification Results ---")
+    all = [x1, x2, x3, x4, x5, x6]
+    p = 0
+    f = 0
+    for t in all ts
+        if t ts p = p + 1
+        el ts f = f + 1 Fin
+    Fin
+    print("Total: " + str(p + f) + " | Passed: " + str(p) + " | Failed: " + str(f))
+    if f == 0 ts
+        print("[OK] All deep verification tests passed!")
+    el ts
+        print("[FAIL] " + str(f) + " test(s) failed")
+    Fin
+Fin
+
+main()

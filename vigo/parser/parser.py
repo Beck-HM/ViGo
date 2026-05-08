@@ -110,6 +110,7 @@ class Parser:
         if t.type == TokenType.CONTINUE: self.eat(TokenType.CONTINUE); self.optional_semicolon(); return ContinueStmt()
         if t.type == TokenType.FUN: return self.parse_func_def()
         if t.type == TokenType.RET: return self.parse_return_stmt()
+        if t.type == TokenType.SPAWN: return self.parse_spawn()
         if t.type == TokenType.SURE: return self.parse_sure_stmt()
 
         if t.type == TokenType.STATIC:
@@ -278,13 +279,19 @@ class Parser:
             elif self.current_token.type == TokenType.EOF: self.error("EnumMissing Fin")
             else:
                 m = self.current_token.value; self.eat(TokenType.IDENTIFIER)
-                val = len(members)
+                if len(members) == 0:
+                    val = 0
+                else:
+                    val = members[-1][1] + 1
                 if self.match(TokenType.ASSIGN): val = self.eval_literal()
                 members.append((m, val)); self.optional_semicolon()
         self.optional_semicolon(); return EnumDef(name, members)
 
     def eval_literal(self):
         t = self.current_token
+        if t.type == TokenType.REGEX:
+            self.eat(TokenType.REGEX)
+            return RegexLiteral(t.value[0], t.value[1])
         if t.type == TokenType.NUMBER: self.eat(TokenType.NUMBER); return t.value
         if t.type == TokenType.STRING: self.eat(TokenType.STRING); return t.value
         if t.type == TokenType.TRUE: self.eat(TokenType.TRUE); return True
@@ -467,7 +474,11 @@ class Parser:
         body, fin_consumed, _ = self._parse_block()
         if not fin_consumed:
             self.eat(TokenType.FIN)
-        self.optional_semicolon(); return FuncDef(name, params, defaults, rest_param, body)
+        self.optional_semicolon()
+        func_def = FuncDef(name, params, defaults, rest_param, body)
+        # Build symbol table for fast variable lookup at runtime
+        func_def.symbol_table = self._build_symbol_table(body, params, rest_param)
+        return func_def
 
     def parse_func_params(self):
         params = []; defaults = {}; rest_param = None
@@ -484,6 +495,189 @@ class Parser:
             if self.match(TokenType.ASSIGN): defaults[params[-1]] = self.parse_expression()
         return params, defaults, rest_param
 
+    def _build_symbol_table(self, body, params, rest_param):
+        """Pre-scan function body to classify variables as local or closure."""
+        from ..runtime.objects import SymbolTable
+        st = SymbolTable()
+
+        # Parameters are always local
+        for p in params:
+            st.local.add(p)
+        if rest_param:
+            st.local.add(rest_param)
+
+        # Collect all variables assigned in the function body
+        assigned = set()
+        self._collect_assignments(body, assigned)
+        st.local.update(assigned)
+
+        # Collect all variables referenced in the function body
+        referenced = set()
+        self._collect_references(body, referenced)
+
+        # Variables that are referenced but not local are closures
+        for name in referenced:
+            if name not in st.local:
+                st.closure.add(name)
+
+        return st
+
+    def _collect_assignments(self, body, assigned):
+        """Walk a statement list and collect all assigned variable names."""
+        for stmt in body:
+            if isinstance(stmt, VarDecl):
+                assigned.add(stmt.name)
+            elif isinstance(stmt, AssignStmt):
+                if isinstance(stmt.target, Variable):
+                    assigned.add(stmt.target.name)
+            elif isinstance(stmt, (FuncDef,)):
+                pass  # Nested function has its own scope
+            elif isinstance(stmt, (IfStmt,)):
+                self._collect_assignments(stmt.then_body, assigned)
+                for _, elif_body in stmt.else_body:
+                    self._collect_assignments(elif_body, assigned)
+            elif isinstance(stmt, (ForInStmt, LoopStmt, DoWhileStmt, SkipStmt)):
+                self._collect_assignments(stmt.body, assigned)
+            elif isinstance(stmt, SwitchStmt):
+                for _, case_body in stmt.cases:
+                    self._collect_assignments(case_body, assigned)
+                self._collect_assignments(stmt.default_body, assigned)
+            elif isinstance(stmt, TryStmt):
+                self._collect_assignments(stmt.try_body, assigned)
+                self._collect_assignments(stmt.catch_body, assigned)
+            elif isinstance(stmt, DestructureDecl):
+                for name in stmt.names:
+                    if isinstance(name, str):
+                        assigned.add(name)
+                    elif isinstance(name, tuple):
+                        for sn in name[1]:
+                            assigned.add(sn)
+
+    def _collect_references(self, body, referenced):
+        """Walk a statement list and collect all referenced variable names."""
+        for stmt in body:
+            if isinstance(stmt, (VarDecl,)):
+                self._collect_refs_expr(stmt.value, referenced)
+            elif isinstance(stmt, AssignStmt):
+                self._collect_refs_expr(stmt.value, referenced)
+                if isinstance(stmt.target, (DotAccess, IndexAccess)):
+                    self._collect_refs_expr(stmt.target, referenced)
+            elif isinstance(stmt, (FuncDef,)):
+                pass  # Nested function, own scope
+            elif isinstance(stmt, IfStmt):
+                self._collect_refs_expr(stmt.condition, referenced)
+                self._collect_references(stmt.then_body, referenced)
+                for cond, elif_body in stmt.else_body:
+                    if cond:
+                        self._collect_refs_expr(cond, referenced)
+                    self._collect_references(elif_body, referenced)
+            elif isinstance(stmt, (ForInStmt,)):
+                self._collect_refs_expr(stmt.iterable, referenced)
+                self._collect_references(stmt.body, referenced)
+            elif isinstance(stmt, (LoopStmt, DoWhileStmt)):
+                self._collect_refs_expr(stmt.condition, referenced)
+                self._collect_references(stmt.body, referenced)
+            elif isinstance(stmt, (SkipStmt,)):
+                self._collect_refs_expr(stmt.condition, referenced)
+                self._collect_references(stmt.body, referenced)
+            elif isinstance(stmt, SwitchStmt):
+                self._collect_refs_expr(stmt.expr, referenced)
+                for _, case_body in stmt.cases:
+                    self._collect_references(case_body, referenced)
+                self._collect_references(stmt.default_body, referenced)
+            elif isinstance(stmt, TryStmt):
+                self._collect_references(stmt.try_body, referenced)
+                self._collect_references(stmt.catch_body, referenced)
+            elif isinstance(stmt, ReturnStmt):
+                self._collect_refs_expr(stmt.value, referenced)
+            elif isinstance(stmt, ThrowStmt):
+                self._collect_refs_expr(stmt.value, referenced)
+            elif isinstance(stmt, SureStmt):
+                self._collect_refs_expr(stmt.condition, referenced)
+            elif isinstance(stmt, FuncCall):
+                self._collect_refs_expr(stmt, referenced)
+            else:
+                self._collect_refs_expr(stmt, referenced)
+
+    def _collect_refs_expr(self, expr, referenced):
+        """Walk an expression tree and collect all Variable references."""
+        if expr is None:
+            return
+        if isinstance(expr, Variable):
+            referenced.add(expr.name)
+        elif isinstance(expr, BinaryOp):
+            self._collect_refs_expr(expr.left, referenced)
+            self._collect_refs_expr(expr.right, referenced)
+        elif isinstance(expr, UnaryOp):
+            self._collect_refs_expr(expr.operand, referenced)
+        elif isinstance(expr, LogicalOp):
+            self._collect_refs_expr(expr.left, referenced)
+            self._collect_refs_expr(expr.right, referenced)
+        elif isinstance(expr, FuncCall):
+            self._collect_refs_expr(expr.name, referenced)
+            for arg in expr.args:
+                self._collect_refs_expr(arg, referenced)
+        elif isinstance(expr, DotAccess):
+            self._collect_refs_expr(expr.object, referenced)
+        elif isinstance(expr, IndexAccess):
+            self._collect_refs_expr(expr.object, referenced)
+            self._collect_refs_expr(expr.index, referenced)
+        elif isinstance(expr, SliceAccess):
+            self._collect_refs_expr(expr.object, referenced)
+            if expr.start:
+                self._collect_refs_expr(expr.start, referenced)
+            if expr.end:
+                self._collect_refs_expr(expr.end, referenced)
+        elif isinstance(expr, InExpr):
+            self._collect_refs_expr(expr.left, referenced)
+            self._collect_refs_expr(expr.right, referenced)
+        elif isinstance(expr, NullCoalesce):
+            self._collect_refs_expr(expr.left, referenced)
+            self._collect_refs_expr(expr.right, referenced)
+        elif isinstance(expr, TernaryExpr):
+            self._collect_refs_expr(expr.condition, referenced)
+            self._collect_refs_expr(expr.then_expr, referenced)
+            self._collect_refs_expr(expr.else_expr, referenced)
+        elif isinstance(expr, PipeExpr):
+            self._collect_refs_expr(expr.left, referenced)
+            self._collect_refs_expr(expr.right, referenced)
+        elif isinstance(expr, RangeExpr):
+            self._collect_refs_expr(expr.start, referenced)
+            self._collect_refs_expr(expr.end, referenced)
+        elif isinstance(expr, OptionalChain):
+            self._collect_refs_expr(expr.object, referenced)
+        elif isinstance(expr, ListCompExpr):
+            self._collect_refs_expr(expr.expr, referenced)
+            self._collect_refs_expr(expr.iterable, referenced)
+            if expr.condition:
+                self._collect_refs_expr(expr.condition, referenced)
+        elif isinstance(expr, ChainedCompare):
+            for op in expr.operands:
+                self._collect_refs_expr(op, referenced)
+        elif isinstance(expr, ListLiteral):
+            for el in expr.elements:
+                self._collect_refs_expr(el, referenced)
+        elif isinstance(expr, DictLiteral):
+            for v in expr.pairs.values():
+                self._collect_refs_expr(v, referenced)
+        elif isinstance(expr, SetLiteral):
+            for el in expr.elements:
+                self._collect_refs_expr(el, referenced)
+        elif isinstance(expr, InterpolatedString):
+            for part in expr.parts:
+                if isinstance(part, tuple):
+                    self._collect_refs_expr(part[0], referenced)
+                elif not isinstance(part, Literal):
+                    self._collect_refs_expr(part, referenced)
+        elif isinstance(expr, NewExpr):
+            for arg in expr.args:
+                self._collect_refs_expr(arg, referenced)
+        elif isinstance(expr, ExpandExpr):
+            self._collect_refs_expr(expr.expr, referenced)
+        elif isinstance(expr, AwaitExpr):
+            self._collect_refs_expr(expr.value, referenced)
+        # Literal, ThisExpr, LambdaExpr, RegexLiteral — no variable references
+
     def parse_return_stmt(self):
         self.eat(TokenType.RET); val = self.parse_expression()
         self.optional_semicolon(); return ReturnStmt(val)
@@ -495,6 +689,12 @@ class Parser:
             msg = self.current_token.value if self.current_token.type == TokenType.STRING else None
             if msg is not None: self.eat(TokenType.STRING)
         self.optional_semicolon(); return SureStmt(cond, msg)
+
+    def parse_spawn(self):
+        self.eat(TokenType.SPAWN)
+        expr = self.parse_expression()
+        self.optional_semicolon()
+        return SpawnStmt(expr, None)
 
     def parse_expr_stmt(self):
         expr = self.parse_expression(); self.optional_semicolon(); return expr
@@ -621,6 +821,10 @@ class Parser:
         if t.type == TokenType.NEW: return self.parse_new_expr()
         if t.type == TokenType.NUMBER: self.eat(TokenType.NUMBER); return Literal(t.value)
         if t.type == TokenType.STRING: return self.parse_string_or_interpolation(t)
+        if t.type == TokenType.REGEX:
+            pattern, flags = t.value
+            self.eat(TokenType.REGEX)
+            return RegexLiteral(pattern, flags)
         if t.type == TokenType.IDENTIFIER:
             name = t.value; self.eat(TokenType.IDENTIFIER)
             if self.current_token.type == TokenType.LPAREN:

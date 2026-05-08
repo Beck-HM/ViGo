@@ -15,6 +15,7 @@ class TokenType(Enum):
     CONST = auto()
     STATIC = auto(); ABSTRACT = auto(); INTERFACE = auto()
     GO = auto(); SKIP = auto(); SURE = auto()
+    SPAWN = auto()
     NOT_IN = auto()
     POWER = auto(); FLOOR_DIV = auto()
 
@@ -27,6 +28,7 @@ class TokenType(Enum):
     PLUS_ASSIGN = auto(); MINUS_ASSIGN = auto()
     STAR_ASSIGN = auto(); SLASH_ASSIGN = auto(); PERCENT_ASSIGN = auto()
     DOT = auto(); QUESTION = auto(); QUESTION_DOT = auto()
+    REGEX = auto()
     NULL_COALESCE = auto()
     PIPE = auto(); RANGE = auto()
     EXPAND = auto()
@@ -75,4 +77,5 @@ KEYWORDS = {
     'static': TokenType.STATIC, 'abstract': TokenType.ABSTRACT,
     'interface': TokenType.INTERFACE,
     'go': TokenType.GO, 'skip': TokenType.SKIP, 'sure': TokenType.SURE,
+    'spawn': TokenType.SPAWN,
 }

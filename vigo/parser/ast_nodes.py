@@ -194,3 +194,13 @@ class AwaitExpr(ASTNode):
 
 class EnumDef(ASTNode):
     def __init__(self, name, members): self.name = name; self.members = members
+
+class RegexLiteral(ASTNode):
+    def __init__(self, pattern, flags):
+        self.pattern = pattern
+        self.flags = flags
+
+class SpawnStmt(ASTNode):
+    def __init__(self, expr, name):
+        self.expr = expr
+        self.name = name

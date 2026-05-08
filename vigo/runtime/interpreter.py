@@ -95,6 +95,23 @@ class Interpreter:
                 right = self._ir_value(inst.operands[1], temps)
                 temps[inst.result] = left / right if right != 0 else 0
 
+            elif inst.opcode in ("IR_SQRT", "IR_ABS", "IR_LEN", "IR_TO_INT",
+                                 "IR_TO_FLOAT", "IR_TO_STR", "IR_ROUND",
+                                 "IR_FLOOR", "IR_CEIL"):
+                import math
+                args = [self._ir_value(o, temps) for o in inst.operands]
+                op = inst.opcode
+                if op == "IR_SQRT": result = math.sqrt(self._n(args[0]))
+                elif op == "IR_ABS": result = abs(self._n(args[0]))
+                elif op == "IR_LEN": result = len(args[0]) if args[0] is not None else 0
+                elif op == "IR_TO_INT": result = int(self._n(args[0]))
+                elif op == "IR_TO_FLOAT": result = float(self._n(args[0]))
+                elif op == "IR_TO_STR": result = str(args[0])
+                elif op == "IR_ROUND": result = round(self._n(args[0]), int(self._n(args[1])) if len(args) > 1 else 0)
+                elif op == "IR_FLOOR": result = math.floor(self._n(args[0]))
+                elif op == "IR_CEIL": result = math.ceil(self._n(args[0]))
+                temps[inst.result] = result
+
             elif inst.opcode == IR_STORE:
                 var_name = inst.operands[0]
                 val = self._ir_value(inst.operands[1], temps)
@@ -205,6 +222,8 @@ class Interpreter:
             'TryStmt':             self._eval_TryStmt,
             'ThrowStmt':           self._eval_ThrowStmt,
             'AwaitExpr':           self._eval_AwaitExpr,
+            'SpawnStmt':           self._eval_SpawnStmt,
+            'RegexLiteral':        self._eval_RegexLiteral,
         }
 
     def eval(self, node, env=None):
@@ -282,9 +301,10 @@ class Interpreter:
         return eval_if(self, node, env)
 
     def _eval_SkipStmt(self, node, env):
-        if not is_truthy(self.eval(node.condition, env)):
-            return eval_block(self, node.body, Environment(env))
-        return None
+        result = None
+        while not is_truthy(self.eval(node.condition, env)):
+            result = eval_block(self, node.body, Environment(env))
+        return result
 
     def _eval_TernaryExpr(self, node, env):
         return self.eval(node.then_expr, env) if is_truthy(self.eval(node.condition, env)) else self.eval(node.else_expr, env)
@@ -373,7 +393,10 @@ class Interpreter:
         return self._chained_compare(node, env)
 
     def _eval_InExpr(self, node, env):
-        return self._in_expr(node, env)
+        needle = self.eval(node.left, env)
+        haystack = self.eval(node.right, env)
+        result = needle in haystack if isinstance(haystack, (str, list, set, tuple, dict)) else False
+        return not result if node.negated else result
 
     def _eval_BinaryOp(self, node, env):
         return self._binary_op(node, env)
@@ -391,7 +414,17 @@ class Interpreter:
         return env.lookup(node.name)
 
     def _eval_ListLiteral(self, node, env):
-        return [self.eval(el, env) for el in node.elements]
+        result = []
+        for el in node.elements:
+            val = self.eval(el, env)
+            if isinstance(el, ExpandExpr):
+                if isinstance(val, list):
+                    result.extend(val)
+                else:
+                    result.append(val)
+            else:
+                result.append(val)
+        return result
 
     def _eval_DictLiteral(self, node, env):
         return {k: self.eval(v, env) for k, v in node.pairs.items()}
@@ -433,7 +466,42 @@ class Interpreter:
         raise ViGoError(str(self.eval(node.value, env)))
 
     def _eval_AwaitExpr(self, node, env):
-        raise AwaitException(float(self.eval(node.value, env)))
+        val = self.eval(node.value, env)
+        # Numeric sleep
+        if isinstance(val, (int, float)):
+            raise AwaitException(float(val))
+        # List of task names
+        if isinstance(val, list):
+            from .eventloop import get_event_loop
+            loop = get_event_loop()
+            return loop.await_all(val)
+        # Single task name
+        if isinstance(val, str):
+            from .eventloop import get_event_loop
+            loop = get_event_loop()
+            return loop.await_all([val])
+        raise AwaitException(float(val) if isinstance(val, (int, float)) else 0)
+
+    def _eval_SpawnStmt(self, node, env):
+        from .eventloop import get_event_loop
+        loop = get_event_loop()
+        if isinstance(node.expr, FuncCall):
+            func = self.eval(node.expr.name, env)
+            evaluated_args = [self.eval(a, env) for a in node.expr.args]
+            name = node.name or f"task_{len(loop.tasks)}"
+            if isinstance(func, BuiltinFunction):
+                loop.spawn(name, func.func, evaluated_args)
+            else:
+                loop.spawn(name, func, evaluated_args)
+        return node.name or "task"
+
+    def _eval_RegexLiteral(self, node, env):
+        import re
+        flags = 0
+        if 'i' in node.flags: flags |= re.IGNORECASE
+        if 'm' in node.flags: flags |= re.MULTILINE
+        if 's' in node.flags: flags |= re.DOTALL
+        return re.compile(node.pattern, flags)
 
     # ═══════════════════════════════════════════════
     #  Expression & object logic (remain in interpreter)
@@ -510,6 +578,9 @@ class Interpreter:
             if func.rest_param and len(final_args) > expected:
                 final_args = final_args[:expected] + [final_args[expected:]]
             call_env = Environment(func.closure)
+            # Attach symbol table for fast variable lookup
+            if hasattr(func, 'symbol_table') and func.symbol_table is not None:
+                call_env.symbol_table = func.symbol_table
             if this_obj is not None:
                 call_env.define('this', this_obj)
             for p, a in zip(func.params, final_args[:expected]): call_env.define(p, a)
@@ -741,6 +812,13 @@ class Interpreter:
             if attr == 'contains': return BuiltinFunction(lambda sub: sub in obj, 'contains')
             if attr == 'find': return BuiltinFunction(lambda sub: obj.find(sub), 'find')
             if attr == 'count': return BuiltinFunction(lambda sub: obj.count(sub), 'count')
+        if hasattr(obj, 'pattern'):  # compiled regex object
+            if attr == 'test':
+                return BuiltinFunction(lambda s: obj.search(s) is not None, 'test')
+            if attr == 'exec':
+                return BuiltinFunction(lambda s: obj.search(s), 'exec')
+            if attr == 'findall':
+                return BuiltinFunction(lambda s: obj.findall(s), 'findall')
         if isinstance(obj, dict):
             if attr == 'keys': return BuiltinFunction(lambda: list(obj.keys()), 'keys')
             if attr == 'values': return BuiltinFunction(lambda: list(obj.values()), 'values')

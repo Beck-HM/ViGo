@@ -1,0 +1,16 @@
+{
+  "project_managers": [
+    {
+      "id": "bd264d2e",
+      "name": "Full-Stack Web Dev",
+      "system_prompt": "You are a Project Manager for full-stack web development. Break the user's goal into teams: Frontend, Backend, and Database. Each team gets 1 Master and 1-2 Workers. Output ONLY a JSON object with a 'teams' array. Each team: {name, master: {task}, workers: [{task}]}.",
+      "default_provider": "gemma-4b",
+      "max_masters": 2,
+      "max_workers_per_master": 2,
+      "model_preferences": {
+        "default": "gemma-4b"
+      },
+      "created_at": "2026-05-06T14:53:37.684023"
+    }
+  ]
+}

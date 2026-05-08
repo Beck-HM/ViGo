@@ -1,93 +1,201 @@
-```markdown
 # ViGo Dev
 
-**Native Desktop IDE for ViGo Development**
+**AI-Powered Development IDE for the ViGo Programming Language**
 
-ViGo Dev is a standalone desktop application that combines a code editor, AI coding assistant, and project manager into one native window — built with PyWebView, Monaco Editor, and the ViGo engine.
+ViGo Dev is a native desktop IDE that combines a code editor, AI coding assistant,
+multi-agent task orchestration, Git integration, and project management into one
+unified environment. Built with PyWebView, Monaco Editor, and Ollama local AI.
+
+## System Requirements
+
+- **OS:** Windows 10 or later
+- **Python:** 3.10 or higher
+- **RAM:** 8 GB minimum (16 GB recommended for larger AI models)
+- **Ollama:** Installed and running (for AI features)
+- **Disk:** ~2 GB free (for AI models)
 
 ---
 
-## Features
+## Installation
 
-### Project Management
-- Create, open, and import ViGo projects via native folder picker
-- Projects are stored in `vigo-dev/Projects/` with symlink support for external directories
-- Remembers last opened project and file across sessions
+### 1. Clone the repository
 
-### File Browser
-- Lazy-loaded directory tree with expand/collapse
-- Right-click context menu: New File, New Folder, Rename, Delete
-- Supported file types: `.vigo`, `.py`, `.js`, `.html`, `.css`, `.json`, `.md`, `.txt`
+```bash
+git clone https://github.com/Beck-HM/ViGo.git
+cd ViGo
+```
 
-### Code Editor (Monaco Editor)
-- ViGo syntax highlighting (30+ keywords)
-- ViGo autocomplete with snippets (Fun as, if, loop, for, switch, class, try, const, enum, etc.)
-- Python, JavaScript, HTML, CSS, JSON, Markdown syntax support
-- Ctrl+S to save, F5 to run
+### 2. Install Python dependencies
 
-### AI Chat Panel
-- Real-time stream output with token-by-token display
-- Code block rendering with syntax highlighting
-- Copy button on each AI message
-- Automatic memory injection via `mem_recall()`
-- Model switcher: auto-discovers local Ollama models, supports cloud configs
-- Tool call: AI can request to read project files (`read_file`)
+```bash
+pip install pywebview chromadb
+```
 
-### Terminal Panel
-- Run `.vigo` files with ▶️ Run button or F5
-- Output display with pass/fail status
-- Collapsible panel
+### 3. Install Ollama
 
-### Memory System
-- `mem_save` — AI auto-extracts key facts and stores to ChromaDB
-- `mem_recall` — Semantic search with time filtering
-- `mem_enhanced_ask` — AI response with automatic memory context
-- Memory snapshot via 🧠 button in toolbar
+Download and install Ollama from [ollama.com](https://ollama.com).
+
+### 4. Pull the recommended model
+
+```bash
+ollama pull gemma2:9b
+```
+
+You can also download models directly from the IDE's **Models** panel.
+
+---
+
+## Agent Mode — Semi-Automated & Fully Automated Workflows
+
+ViGo Dev features a unique **Agent Mode** that lets you automate complex coding
+tasks using AI. It comes in two flavors:
+
+<p align="center">
+  <img src="screenshot-1.png" width="700" alt="Auto Agent Result">
+  <br><em>Auto Agent completed project — a Python calculator with GUI, showing
+  gui.py in the editor</em>
+</p>
+
+### Semi-Automated (Manual Mode)
+
+In the Task Manager's **Manual Mode**, you define a pipeline of steps and assign
+each step to a Master chat or a Worker chat. The AI executes steps in order,
+passing context from one step to the next.
+
+- **Alone Mode** — Each chat runs its own independent task chain
+- **Manager Mode** — A single pipeline with assignable steps. The Master can
+  delegate specific steps to Workers, and results flow back automatically
+
+This is ideal when you want full control over the workflow but don't want to
+manually type each instruction.
+
+<p align="center">
+  <img src="screenshot-2.png" width="700" alt="Task Manager Manual Mode">
+  <br><em>Task Manager — Manual Mode with step configuration for each master
+  chat</em>
+</p>
+
+### Fully Automated (Auto Mode)
+
+In **Auto Mode**, you create a **Project Manager** — an AI agent with a custom
+System Prompt that defines how it plans and delegates work. You give it a goal
+(e.g. "Build a Python calculator with GUI"), and the Project Manager:
+
+1. **Decomposes** the goal into structured teams and steps using its System Prompt
+2. **Creates** Master and Worker chats automatically
+3. **Executes** the pipeline step by step, passing context between them
+4. **Monitors** progress in real-time through the Agent Monitor panel
+
+Each Project Manager can be configured with:
+- A custom System Prompt that defines its planning strategy
+- Limits on the number of Masters and Workers
+- A default AI model
+
+Preset templates are included for common workflows like Full-Stack Web
+Development, Bug Fixing, Code Refactoring, and Test Writing.
+
+The Agent Monitor shows live progress of each team and step, with color-coded
+status indicators (✅ done / 🔧 running / ⏳ waiting).
+
+<p align="center">
+  <img src="screenshot-3.png" width="700" alt="Task Manager Auto Mode">
+  <br><em>Task Manager — Auto Mode showing a Full-Stack Web Dev Project
+  Manager</em>
+</p>
+
+<p align="center">
+  <img src="screenshot-4.png" width="700" alt="Create Project Manager">
+  <br><em>Creating a new Project Manager with custom System Prompt, model, and
+  limits</em>
+</p>
+
+<p align="center">
+  <img src="screenshot-5.png" width="700" alt="Launch Project Manager">
+  <br><em>Launching a Project Manager — setting project name, path, and goal
+  before AI decomposes the task</em>
+</p>
 
 ---
 
 ## Quick Start
 
-### Requirements
-- Python 3.10+
-- Ollama (for local AI models)
-- ChromaDB (optional, for memory system)
+1. **Start Ollama** (if not already running):
 
-### Install Dependencies
 ```bash
-pip install pywebview chromadb
+ollama serve
 ```
 
-### Launch
+2. **Launch ViGo Dev**:
+
 ```bash
-cd F:\ViGo\vigo-dev
+cd vigo-dev
 python main.py
 ```
 
-A 1400×900 dark-themed window will open. Create a new project or open an existing one to start.
+3. **Open or create a project** from `Project > New Project` or `Project > Open Project`.
 
-### Using AI Features
-1. Ensure Ollama is running with at least one model loaded:
-   ```bash
-   ollama pull gemma-4b
-   ```
-2. In ViGo Dev, select your model from the 🤖 Model menu
-3. Type in the AI chat panel and press Enter
-4. The AI can read your project files — just ask it to "look at parser.py"
+4. **Start coding** — use the AI assistant panel on the right, or press `F3` to
+   select code and ask questions about it.
+
+> **Note:** AI features require Ollama to be running. Without it, the editor and
+> file management still work fully.
+
 
 ---
 
-## Project Structure
-```
-vigo-dev/
-├── main.py              # PyWebView window entry point + JSBridge
-├── api.py               # Backend API (file ops, AI calls, memory, projects)
-├── ui/
-│   └── index.html       # Frontend (HTML + CSS + JS, all embedded)
-├── models/              # Cloud model configs (JSON files)
-├── Projects/            # Default project storage directory
-└── .vigo_config.json    # User preferences (last project, model)
-```
+## Features
+
+### Code Editor
+- Monaco Editor with ViGo syntax highlighting and autocomplete
+- Simultaneously supporting Python
+- Multi-tab editor with drag-and-drop file opening
+- F3 code selection — select any code and ask AI about it
+- Diff view — compare files with their backups (Monaco Diff Editor)
+
+### AI Assistant
+- Multi-turn conversation with streaming token display
+- Read, write, create, and search files directly from chat
+- Tool execution status display (Thinking / Reading / Writing)
+- Auto memory recall — remembers past conversations
+- Per-chat model selection
+
+### Multi-Chat & Worker System
+- Multiple independent AI conversations with tab management
+- Master / Worker architecture — delegate tasks to sub-chats
+- Collapsible chat tabs for better organization
+- Right-click rename on chat tabs
+
+### Task Manager
+- **Manual Mode:** Alone (independent) and Manager (pipeline) task modes
+- **Auto Mode:** Project Manager agents that decompose goals into steps
+- Pipeline execution with context passing between steps
+- Task templates — save and reuse common workflows
+
+### Auto Agent
+- Create Project Managers with custom System Prompts
+- AI-powered goal decomposition into multi-step pipelines
+- Automatic Worker creation and parallel execution
+- Real-time Agent Monitor panel
+
+### Git Integration
+- View branch, status, and changed files
+- Commit, push, pull from within the IDE
+- Create and switch branches
+
+### Models Panel
+- List installed Ollama models
+- Download popular models with progress tracking
+- Delete models
+
+### Project Management
+- Create ViGo or Python projects
+- File tree with right-click context menu
+- Automatic backup before AI file modifications
+
+### Settings
+- AI: Ollama host, memory mode, auto-save interval, timeout
+- Editor: font size, theme, tab size, word wrap
+- Customizable F3 shortcut key
 
 ---
 
@@ -97,35 +205,52 @@ vigo-dev/
 |----------|--------|
 | `Ctrl+S` | Save current file |
 | `F5` | Run current `.vigo` file |
-| `Enter` | Send AI message |
-| `Shift+Enter` | New line in AI input |
+| `F3` | Enter code selection mode to ask AI |
+| `Ctrl+Shift+N` (customizable) | Configure F3 shortcut in Settings |
 
 ---
 
-## Architecture
+## Configuration
 
-```
-┌─────────────────────────────────────────┐
-│  UI Layer (HTML/CSS/JS)                 │
-│  Monaco Editor + File Tree + Chat       │
-└──────────────┬──────────────────────────┘
-               │ PyWebView JS Bridge
-┌──────────────▼──────────────────────────┐
-│  Python Shell (main.py + api.py)        │
-│  Window management, file I/O            │
-└──────────────┬──────────────────────────┘
-               │ Calls ViGo Interpreter
-┌──────────────▼──────────────────────────┐
-│  ViGo Engine                            │
-│  ailib.py (AI) + memlib.py (Memory)     │
-└─────────────────────────────────────────┘
-```
+Settings are stored in `.vigo_config.json` inside the `vigo-dev/` directory.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `ollama_host` | `http://localhost:11434` | Ollama API endpoint |
+| `memory_mode` | `auto` | Auto-inject conversation history (`auto` / `manual`) |
+| `timeout` | `120` | AI request timeout in seconds |
+| `theme` | `vs-dark` | Editor theme (`vs` / `vs-dark` / `hc-black`) |
+| `font_size` | `13` | Editor font size |
+| `f3_shortcut` | `F3` | Customizable code selection key |
+---
+
+## Beta Notice
+
+This software is currently in **beta testing**. Features are functional but may
+contain bugs or rough edges. If you encounter any issues, please report them at:
+
+[https://github.com/Beck-HM/ViGo/issues](https://github.com/Beck-HM/ViGo/issues)
+
+Your feedback helps make ViGo Dev better.
 
 ---
 
-## Version
+## Known Limitations
 
-ViGo Dev is part of ViGo v3.7.
+- **Drag & drop files** from external file manager is not supported due to
+  PyWebView limitations. Use `File > Open` or the file tree.
+- **Bytecode VM** does not support class definitions or the pipe operator
+  (`|>`). Use the tree-walk interpreter or Python transpiler for full features.
+- **Parallel AI execution** is not yet supported. Multi-step pipelines run
+  sequentially.
+- **Ollama required** for all AI features. Cloud API support is planned for a
+  future release.
+  
+---
 
-We are still in the early stages of testing. If you encounter any bugs, you can provide feedback. These are just some demonstrations
+
+## Links
+
+- **GitHub:** [https://github.com/Beck-HM/ViGo](https://github.com/Beck-HM/ViGo)
+- **Issues:** [https://github.com/Beck-HM/ViGo/issues](https://github.com/Beck-HM/ViGo/issues)
 ```

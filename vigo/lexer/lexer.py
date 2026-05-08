@@ -1,3 +1,4 @@
+import re
 from .tokens import TokenType, Token, KEYWORDS
 
 
@@ -117,6 +118,48 @@ class Lexer:
             self.advance()
         return Token(TokenType.STRING, result, start_line, start_col)
 
+    def _is_regex_start(self):
+        """Check if '/' starts a regex literal (not division)."""
+        i = self.pos - 2
+        while i >= 0 and self.source[i] in ' \t':
+            i = i - 1
+        if i >= 0:
+            prev = self.source[i]
+            if prev in ')]}' or prev.isalnum() or prev == '_':
+                return False
+        return True
+
+    def read_regex(self, start_col):
+        """Read regex literal: /pattern/flags"""
+        start_line = self.line
+        pattern = ''
+        while self.current_char is not None and self.current_char != '/':
+            if self.current_char == '\\':
+                self.advance()
+                pattern += '\\' + (self.current_char or '')
+            else:
+                pattern += self.current_char
+            self.advance()
+        if self.current_char != '/':
+            self.error("Regex missing closing slash")
+        self.advance()
+        flags = ''
+        while self.current_char is not None and self.current_char.isalpha():
+            flags += self.current_char
+            self.advance()
+        try:
+            re.compile(pattern, self._regex_flags(flags))
+        except re.error as e:
+            self.error(f"Invalid regex: {e}")
+        return Token(TokenType.REGEX, (pattern, flags), start_line, start_col)
+
+    def _regex_flags(self, flags):
+        f = 0
+        if 'i' in flags: f |= re.IGNORECASE
+        if 'm' in flags: f |= re.MULTILINE
+        if 's' in flags: f |= re.DOTALL
+        return f
+
     def get_next_token(self):
         self.skip_whitespace_and_comments()
         if self.current_char is None:
@@ -124,11 +167,9 @@ class Lexer:
 
         c = self.current_char
 
-        # Smart quote detection (early check)
         if c == '\u201c' or c == '\u201d' or c == '\u2018' or c == '\u2019':
             self.error("Smart/curly quotes detected. Use straight quotes (\") or (') instead.")
 
-        # Multiline string """
         if c == '"' and self.peek() == '"':
             p2 = self.pos + 2
             if p2 < len(self.source) and self.source[p2] == '"':
@@ -169,6 +210,8 @@ class Lexer:
             sc = self.col; self.advance()
             if self.current_char == '=': self.advance(); return Token(TokenType.SLASH_ASSIGN, '/=', self.line, sc)
             if self.current_char == '/': self.advance(); return Token(TokenType.FLOOR_DIV, '//', self.line, sc)
+            if self._is_regex_start():
+                return self.read_regex(sc)
             return Token(TokenType.SLASH, '/', self.line, sc)
 
         if c == '+':

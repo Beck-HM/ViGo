@@ -12,13 +12,14 @@ from ..runtime.errors import ViGoError
 class MemoryStore:
     """Persistent memory with ChromaDB vector search and AI-powered fact extraction."""
 
-    def __init__(self, db_path=None):
+    def __init__(self, db_path=None, embedding_model="nomic-embed-text"):
         if db_path is None:
             db_path = os.path.join(os.path.expanduser("~"), ".vigo_memory.db")
         self.db_path = db_path
         self._chroma_client = None
         self._chroma_collection = None
         self._use_chromadb = False
+        self.embedding_model = embedding_model
         self._init_db()
         self._init_chromadb()
 
@@ -59,10 +60,10 @@ class MemoryStore:
             self._use_chromadb = False
 
     def _get_embedding(self, text):
-        """Generate embedding via Ollama nomic-embed-text."""
+        """Generate embedding via Ollama embedding model."""
         try:
             data = json.dumps({
-                "model": "nomic-embed-text",
+                "model": self.embedding_model,
                 "prompt": str(text)[:512]
             }).encode('utf-8')
             req = urllib.request.Request(
@@ -80,14 +81,15 @@ class MemoryStore:
     #  AI helpers (use _ai singleton from ailib)
     # ═══════════════════════════════════════
 
-    def _ai_ask(self, prompt, model="gemma-4b"):
-        """Call AI via ailib's singleton."""
+    def _ai_ask(self, prompt, model="gemma-4b", provider=None):
+        """Call AI via ailib's singleton, respecting configured provider."""
         from .ailib import _ai
-        _ai.set_provider("ollama")
-        return _ai.ask(prompt, model, provider="ollama")
+        if provider is None:
+            provider = _ai.provider or "ollama"
+        return _ai.ask(prompt, model, provider=provider)
 
     def _extract_facts(self, content):
-        """Use AI to extract key facts from content."""
+        """Use AI to extract key facts from content. Falls back to regex, then empty list."""
         prompt = f"""Extract key facts from the following content. Return ONLY a JSON array of strings, each string is one key fact. Do not include any other text.
 
 Content:
@@ -102,11 +104,19 @@ Output format example:
             end = response.rfind("]") + 1
             if start >= 0 and end > start:
                 facts = json.loads(response[start:end])
-                return facts if isinstance(facts, list) else [str(content)[:200]]
+                if isinstance(facts, list) and len(facts) > 0:
+                    return facts
         except Exception:
             pass
-        # Fallback: use first 200 chars as single fact
-        return [str(content)[:200]]
+
+        # Fallback: regex extract key sentences (capitalized, with key verbs, reasonable length)
+        import re
+        sentences = re.findall(r'[A-Z][^.!?]{20,}', str(content))
+        if sentences:
+            return [s.strip() for s in sentences[:5]]
+
+        # Final fallback: return empty, don't pollute memory with raw truncation
+        return []
 
     # ═══════════════════════════════════════
     #  Public API
@@ -225,7 +235,7 @@ Output format example:
         except Exception:
             return []
 
-    def enhanced_ask(self, prompt, model="gemma-4b", memory_limit=5, hours=None):
+    def enhanced_ask(self, prompt, model="gemma-4b", memory_limit=5, hours=None, provider=None):
         """Ask AI with relevant memories injected into the prompt."""
         memories = self.recall(prompt, limit=memory_limit, hours=hours)
 
@@ -237,7 +247,7 @@ Output format example:
         else:
             enhanced_prompt = prompt
 
-        return self._ai_ask(enhanced_prompt, model)
+        return self._ai_ask(enhanced_prompt, model, provider=provider)
 
     def snapshot(self):
         """Return a summary of all stored memories."""
@@ -299,6 +309,11 @@ Output format example:
             rows = conn.execute("SELECT key FROM memory ORDER BY key").fetchall()
             return [r[0] for r in rows]
 
+    def set_embedding_model(self, model_name):
+        """Change the embedding model used for vector search."""
+        self.embedding_model = model_name
+        return True
+
     def _fetch_by_keys_with_scores(self, keys, distances, metadatas):
         if not keys:
             return []
@@ -342,8 +357,8 @@ def register(env):
     env.define('mem_recall', BuiltinFunction(
         lambda query, limit=10, hours=None: _store.recall(query, limit, hours), 'mem_recall'))
     env.define('mem_enhanced_ask', BuiltinFunction(
-        lambda prompt, model="gemma-4b", memory_limit=5, hours=None:
-            _store.enhanced_ask(prompt, model, memory_limit, hours), 'mem_enhanced_ask'))
+        lambda prompt, model="gemma-4b", memory_limit=5, hours=None, provider=None:
+            _store.enhanced_ask(prompt, model, memory_limit, hours, provider), 'mem_enhanced_ask'))
     env.define('mem_snapshot', BuiltinFunction(
         lambda: _store.snapshot(), 'mem_snapshot'))
     env.define('mem_get', BuiltinFunction(
@@ -356,3 +371,28 @@ def register(env):
         lambda: _store.size(), 'mem_size'))
     env.define('mem_list', BuiltinFunction(
         lambda: _store.list_keys(), 'mem_list'))
+    env.define('mem_set_embedding_model', BuiltinFunction(
+        lambda model_name: _store.set_embedding_model(model_name), 'mem_set_embedding_model'))
+    env.define('mem_init_project', BuiltinFunction(
+        lambda project_path: str(mem_init_project(project_path)), 'mem_init_project'))
+    env.define('mem_save_project', BuiltinFunction(
+        lambda project_path, key, content: _get_project_store(project_path).save(key, content), 'mem_save_project'))
+    env.define('mem_recall_project', BuiltinFunction(
+        lambda project_path, query, limit=10: _get_project_store(project_path).recall(query, limit), 'mem_recall_project'))
+
+_project_stores = {}
+
+
+def mem_init_project(project_path):
+    """Initialize a project-level memory store."""
+    db_path = os.path.join(project_path, ".vigo_memory", "project_memory.db")
+    store = MemoryStore(db_path)
+    _project_stores[project_path] = store
+    return store
+
+
+def _get_project_store(project_path):
+    """Get or create a project-level memory store."""
+    if project_path not in _project_stores:
+        return mem_init_project(project_path)
+    return _project_stores[project_path]

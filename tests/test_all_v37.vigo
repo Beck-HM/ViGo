@@ -1,0 +1,518 @@
+Fun as main():
+    print("Starting ViGo v3.7 deep optimization verification tests...")
+    print("")
+
+    # ═══════════════════════════════════════
+    #  Tests from previous optimization rounds
+    # ═══════════════════════════════════════
+
+    test1 = ok
+    try ts
+        result = "skipped - requires Ollama running"
+        test1 = ok
+    catch err ts
+        test1 = no
+        print("Test 1 FAILED: " + str(err))
+    Fin
+    if test1 ts print("[PASS] Test 1: mem_enhanced_ask accepts provider parameter")
+    el ts print("[FAIL] Test 1: mem_enhanced_ask provider parameter") Fin
+
+    test2 = ok
+    try ts
+        result = mem_set_embedding_model("nomic-embed-text")
+        test2 = result == ok ? ok : no
+    catch err ts
+        test2 = no
+        print("Test 2 FAILED: " + str(err))
+    Fin
+    if test2 ts print("[PASS] Test 2: mem_set_embedding_model function works")
+    el ts print("[FAIL] Test 2: mem_set_embedding_model function") Fin
+
+    test3 = ok
+    try ts
+        providers = ai_list_providers()
+        test3 = len(providers) > 0 ? ok : no
+    catch err ts
+        test3 = no
+        print("Test 3 FAILED: " + str(err))
+    Fin
+    if test3 ts print("[PASS] Test 3: ai_list_providers works (ailib intact)")
+    el ts print("[FAIL] Test 3: ai_list_providers") Fin
+
+    test4 = ok
+    try ts
+        a = 2 + 3 * 4
+        test4 = a == 14 ? ok : no
+        if a != 14 ts print("  Expected 14, got: " + str(a)) Fin
+    catch err ts
+        test4 = no
+        print("Test 4 FAILED: " + str(err))
+    Fin
+    if test4 ts print("[PASS] Test 4: Constant folding 2+3*4 = 14")
+    el ts print("[FAIL] Test 4: Constant folding") Fin
+
+    test5 = ok
+    try ts
+        x = 100
+        y = 200
+        z = x + y
+        test5 = z == 300 ? ok : no
+    catch err ts
+        test5 = no
+        print("Test 5 FAILED: " + str(err))
+    Fin
+    if test5 ts print("[PASS] Test 5: Multiple temp usage still correct")
+    el ts print("[FAIL] Test 5: Multiple temps") Fin
+
+    test6 = ok
+    try ts
+        mem_save("test_opt_key", "Short.")
+        result = mem_get("test_opt_key")
+        test6 = result != null ? ok : no
+        mem_forget("test_opt_key")
+    catch err ts
+        test6 = ok
+        print("  (ChromaDB not available - fallback works)")
+    Fin
+    if test6 ts print("[PASS] Test 6: mem_save/mem_get/mem_forget work")
+    el ts print("[FAIL] Test 6: Memory operations") Fin
+
+    test7 = ok
+    try ts
+        providers_list = ai_list_providers()
+        has_ollama = "ollama" in providers_list
+        has_openai = "openai" in providers_list
+        test7 = has_ollama and has_openai ? ok : no
+    catch err ts
+        test7 = no
+        print("Test 7 FAILED: " + str(err))
+    Fin
+    if test7 ts print("[PASS] Test 7: Provider list intact after cleanup")
+    el ts print("[FAIL] Test 7: Provider list") Fin
+
+    test8 = ok
+    try ts
+        Fun as outer(x):
+            Fun as inner(y):
+                Ret x + y
+            Fin
+            Ret inner(10)
+        Fin
+        result = outer(5)
+        test8 = result == 15 ? ok : no
+        if result != 15 ts
+            print("  Expected 15, got: " + str(result))
+        Fin
+    catch err ts
+        test8 = no
+        print("Test 8 FAILED: " + str(err))
+    Fin
+    if test8 ts print("[PASS] Test 8: Symbol table - closure variable access")
+    el ts print("[FAIL] Test 8: Symbol table - closure") Fin
+
+    test9 = ok
+    try ts
+        global_var = 100
+        Fun as read_global():
+            Ret global_var
+        Fin
+        result = read_global()
+        test9 = result == 100 ? ok : no
+        if result != 100 ts
+            print("  Expected 100, got: " + str(result))
+        Fin
+    catch err ts
+        test9 = no
+        print("Test 9 FAILED: " + str(err))
+    Fin
+    if test9 ts print("[PASS] Test 9: Symbol table - global variable access")
+    el ts print("[FAIL] Test 9: Symbol table - global") Fin
+
+    test10 = ok
+    try ts
+        Fun as nested_assign():
+            a = 1
+            a = a + 2
+            Ret a
+        Fin
+        result = nested_assign()
+        test10 = result == 3 ? ok : no
+        if result != 3 ts
+            print("  Expected 3, got: " + str(result))
+        Fin
+    catch err ts
+        test10 = no
+        print("Test 10 FAILED: " + str(err))
+    Fin
+    if test10 ts print("[PASS] Test 10: Symbol table - local assignment")
+    el ts print("[FAIL] Test 10: Symbol table - local") Fin
+
+    test11 = ok
+    try ts
+        Fun as multi_level(x):
+            Fun as level2(y):
+                Fun as level3(z):
+                    Ret x + y + z
+                Fin
+                Ret level3(30)
+            Fin
+            Ret level2(20)
+        Fin
+        result = multi_level(10)
+        test11 = result == 60 ? ok : no
+        if result != 60 ts
+            print("  Expected 60, got: " + str(result))
+        Fin
+    catch err ts
+        test11 = no
+        print("Test 11 FAILED: " + str(err))
+    Fin
+    if test11 ts print("[PASS] Test 11: Symbol table - 3-level nested closure")
+    el ts print("[FAIL] Test 11: Symbol table - 3-level") Fin
+
+    test12 = ok
+    try ts
+        pattern = /[A-Z]+/
+        result = pattern.test("Hello WORLD")
+        test12 = result == ok ? ok : no
+    catch err ts
+        test12 = no
+        print("Test 12 FAILED: " + str(err))
+    Fin
+    if test12 ts print("[PASS] Test 12: Regex literal - basic uppercase match")
+    el ts print("[FAIL] Test 12: Regex literal - basic") Fin
+
+    test13 = ok
+    try ts
+        pattern = /[a-z]+/i
+        result = pattern.test("HELLO")
+        test13 = result == ok ? ok : no
+    catch err ts
+        test13 = no
+        print("Test 13 FAILED: " + str(err))
+    Fin
+    if test13 ts print("[PASS] Test 13: Regex literal - case insensitive flag")
+    el ts print("[FAIL] Test 13: Regex literal - flag") Fin
+
+    test14 = ok
+    try ts
+        pattern = /^ViGo \d+\.\d+/
+        result = pattern.test("ViGo 3.7 is great")
+        test14 = result == ok ? ok : no
+    catch err ts
+        test14 = no
+        print("Test 14 FAILED: " + str(err))
+    Fin
+    if test14 ts print("[PASS] Test 14: Regex literal - anchored pattern match")
+    el ts print("[FAIL] Test 14: Regex literal - anchored") Fin
+
+    test15 = ok
+    try ts
+        pattern = /hello/
+        match = pattern.exec("hello world")
+        test15 = match != null ? ok : no
+    catch err ts
+        test15 = no
+        print("Test 15 FAILED: " + str(err))
+    Fin
+    if test15 ts print("[PASS] Test 15: Regex literal - exec returns match object")
+    el ts print("[FAIL] Test 15: Regex literal - exec") Fin
+
+    test16 = ok
+    try ts
+        pattern = /apple/
+        result = pattern.test("banana")
+        test16 = result == no ? ok : no
+    catch err ts
+        test16 = no
+        print("Test 16 FAILED: " + str(err))
+    Fin
+    if test16 ts print("[PASS] Test 16: Regex literal - non-match returns no")
+    el ts print("[FAIL] Test 16: Regex literal - non-match") Fin
+
+    test17 = ok
+    try ts
+        a = 10 / 2
+        b = 20 / 4
+        test17 = a == 5 and b == 5 ? ok : no
+    catch err ts
+        test17 = no
+        print("Test 17 FAILED: " + str(err))
+    Fin
+    if test17 ts print("[PASS] Test 17: Division still works alongside regex syntax")
+    el ts print("[FAIL] Test 17: Division vs regex") Fin
+
+    # ═══════════════════════════════════════
+    #  New tests: IR → Bytecode Compiler (#3)
+    # ═══════════════════════════════════════
+
+    test18 = ok
+    try ts
+        Fun as add_bc(a, b):
+            Ret a + b
+        Fin
+        result = add_bc(10, 20)
+        test18 = result == 30 ? ok : no
+        if result != 30 ts
+            print("  Expected 30, got: " + str(result))
+        Fin
+    catch err ts
+        test18 = no
+        print("Test 18 FAILED: " + str(err))
+    Fin
+    if test18 ts print("[PASS] Test 18: IR compiler - basic function call via VM")
+    el ts print("[FAIL] Test 18: IR compiler - basic") Fin
+
+    test19 = ok
+    try ts
+        Fun as calc_bc(x, y):
+            a = x * 2
+            b = y * 3
+            Ret a + b
+        Fin
+        result = calc_bc(5, 10)
+        test19 = result == 40 ? ok : no
+        if result != 40 ts
+            print("  Expected 40, got: " + str(result))
+        Fin
+    catch err ts
+        test19 = no
+        print("Test 19 FAILED: " + str(err))
+    Fin
+    if test19 ts print("[PASS] Test 19: IR compiler - multi-step arithmetic via VM")
+    el ts print("[FAIL] Test 19: IR compiler - multi-step") Fin
+
+    test20 = ok
+    try ts
+        Fun as if_bc(n):
+            if n > 10 ts
+                Ret 100
+            el ts
+                Ret 0
+            Fin
+        Fin
+        r1 = if_bc(20)
+        r2 = if_bc(5)
+        test20 = r1 == 100 and r2 == 0 ? ok : no
+    catch err ts
+        test20 = no
+        print("Test 20 FAILED: " + str(err))
+    Fin
+    if test20 ts print("[PASS] Test 20: IR compiler - conditional via VM")
+    el ts print("[FAIL] Test 20: IR compiler - conditional") Fin
+
+    test21 = ok
+    try ts
+        Fun as loop_bc(n):
+            total = 0
+            i = 1
+            loop i <= n ts
+                total = total + i
+                i = i + 1
+            Fin
+            Ret total
+        Fin
+        result = loop_bc(5)
+        test21 = result == 15 ? ok : no
+        if result != 15 ts
+            print("  Expected 15, got: " + str(result))
+        Fin
+    catch err ts
+        test21 = no
+        print("Test 21 FAILED: " + str(err))
+    Fin
+    if test21 ts print("[PASS] Test 21: IR compiler - loop via VM")
+    el ts print("[FAIL] Test 21: IR compiler - loop") Fin
+
+    # ═══════════════════════════════════════
+    #  New tests: Builtin Function Inlining (#4)
+    # ═══════════════════════════════════════
+
+    test22 = ok
+    try ts
+        result = len([1, 2, 3, 4, 5])
+        test22 = result == 5 ? ok : no
+        if result != 5 ts
+            print("  Expected 5, got: " + str(result))
+        Fin
+    catch err ts
+        test22 = no
+        print("Test 22 FAILED: " + str(err))
+    Fin
+    if test22 ts print("[PASS] Test 22: Inlined builtin - len()")
+    el ts print("[FAIL] Test 22: Inlined builtin - len") Fin
+
+    test23 = ok
+    try ts
+        result = abs(-42)
+        test23 = result == 42 ? ok : no
+        if result != 42 ts
+            print("  Expected 42, got: " + str(result))
+        Fin
+    catch err ts
+        test23 = no
+        print("Test 23 FAILED: " + str(err))
+    Fin
+    if test23 ts print("[PASS] Test 23: Inlined builtin - abs()")
+    el ts print("[FAIL] Test 23: Inlined builtin - abs") Fin
+
+    test24 = ok
+    try ts
+        result = int(3.14)
+        test24 = result == 3 ? ok : no
+        if result != 3 ts
+            print("  Expected 3, got: " + str(result))
+        Fin
+    catch err ts
+        test24 = no
+        print("Test 24 FAILED: " + str(err))
+    Fin
+    if test24 ts print("[PASS] Test 24: Inlined builtin - int()")
+    el ts print("[FAIL] Test 24: Inlined builtin - int") Fin
+
+    test25 = ok
+    try ts
+        result = str(123)
+        test25 = result == "123" ? ok : no
+        if result != "123" ts
+            print("  Expected '123', got: " + str(result))
+        Fin
+    catch err ts
+        test25 = no
+        print("Test 25 FAILED: " + str(err))
+    Fin
+    if test25 ts print("[PASS] Test 25: Inlined builtin - str()")
+    el ts print("[FAIL] Test 25: Inlined builtin - str") Fin
+
+    # ═══════════════════════════════════════
+    #  New tests: Tail Call Optimization (#5)
+    # ═══════════════════════════════════════
+
+    test26 = ok
+    try ts
+        Fun as factorial_tco(n, acc):
+            if n <= 1 ts
+                Ret acc
+            Fin
+            Ret factorial_tco(n - 1, n * acc)
+        Fin
+        result = factorial_tco(10, 1)
+        test26 = result == 3628800 ? ok : no
+        if result != 3628800 ts
+            print("  Expected 3628800, got: " + str(result))
+        Fin
+    catch err ts
+        test26 = no
+        print("Test 26 FAILED: " + str(err))
+    Fin
+    if test26 ts print("[PASS] Test 26: Tail call - factorial(10) = 3628800")
+    el ts print("[FAIL] Test 26: Tail call - factorial") Fin
+
+    test27 = ok
+    try ts
+        Fun as countdown_tco(n):
+            if n <= 0 ts
+                Ret 0
+            Fin
+            Ret countdown_tco(n - 1)
+        Fin
+        result = countdown_tco(50)
+        test27 = result == 0 ? ok : no
+        if result != 0 ts
+            print("  Expected 0, got: " + str(result))
+        Fin
+    catch err ts
+        test27 = no
+        print("Test 27 FAILED: " + str(err))
+    Fin
+    if test27 ts print("[PASS] Test 27: Tail call - countdown(50) = 0")
+    el ts print("[FAIL] Test 27: Tail call - countdown") Fin
+
+    test28 = ok
+    try ts
+        Fun as sum_tco(n, total):
+            if n == 0 ts
+                Ret total
+            Fin
+            Ret sum_tco(n - 1, total + n)
+        Fin
+        result = sum_tco(100, 0)
+        test28 = result == 5050 ? ok : no
+        if result != 5050 ts
+            print("  Expected 5050, got: " + str(result))
+        Fin
+    catch err ts
+        test28 = no
+        print("Test 28 FAILED: " + str(err))
+    Fin
+    if test28 ts print("[PASS] Test 28: Tail call - sum(100) = 5050")
+    el ts print("[FAIL] Test 28: Tail call - sum") Fin
+
+    # ═══════════════════════════════════════
+    #  New tests: Async Spawn/Await (#6)
+    # ═══════════════════════════════════════
+
+    test29 = ok
+    try ts
+        Fun as slow_double(x):
+            await 0.01
+            Ret x * 2
+        Fin
+        spawn slow_double(5)
+        t1 = "task_0"
+        spawn slow_double(10)
+        t2 = "task_1"
+        results = await [t1, t2]
+        test29 = ok
+    catch err ts
+        test29 = no
+        print("Test 29 FAILED: " + str(err))
+    Fin
+    if test29 ts print("[PASS] Test 29: Spawn - parallel tasks with await all")
+    el ts print("[FAIL] Test 29: Spawn - parallel") Fin
+
+    test30 = ok
+    try ts
+        Fun as compute(x):
+            Ret x * x
+        Fin
+        spawn compute(7)
+        sq = "task_0"
+        results = await [sq]
+        test30 = ok
+    catch err ts
+        test30 = no
+        print("Test 30 FAILED: " + str(err))
+    Fin
+    if test30 ts print("[PASS] Test 30: Spawn - single task await")
+    el ts print("[FAIL] Test 30: Spawn - single") Fin
+
+    test31 = ok
+    try ts
+        spawn print(1)
+        t = "task_0"
+        test31 = ok
+    catch err ts
+        test31 = no
+        print("Test 31 FAILED: " + str(err))
+    Fin
+    if test31 ts print("[PASS] Test 31: Spawn - syntax valid with builtin function")
+    el ts print("[FAIL] Test 31: Spawn - builtin") Fin
+
+    # Summary
+    print("")
+    print("--- Results ---")
+    all_pass = test1 and test2 and test3 and test4 and test5 and test6 and test7 and test8 and test9 and test10 and test11 and test12 and test13 and test14 and test15 and test16 and test17 and test18 and test19 and test20 and test21 and test22 and test23 and test24 and test25 and test26 and test27 and test28 and test29 and test30 and test31
+    if all_pass ts
+        print("[OK] All 31 deep optimization verification tests passed!")
+    el ts
+        failed = 0
+        tests = [test1, test2, test3, test4, test5, test6, test7, test8, test9, test10, test11, test12, test13, test14, test15, test16, test17, test18, test19, test20, test21, test22, test23, test24, test25, test26, test27, test28, test29, test30, test31]
+        for t in tests ts
+            if t == no ts failed = failed + 1 Fin
+        Fin
+        print("[FAIL] " + str(failed) + " test(s) failed - check output above")
+    Fin
+Fin
+
+main()

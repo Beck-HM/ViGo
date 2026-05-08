@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# IDE
+.vigo_config.json
+.vigo_project.json
+memory/
+Projects/
+models/Local/
+*.vigo_backup
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Build
+dist/
+build/
+*.spec
+
+# Logs
+*.txt
+!requirements.txt

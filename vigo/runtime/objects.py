@@ -7,6 +7,21 @@ class BuiltinFunction:
         return f"⚙️ {self.name}"
 
 
+class SymbolTable:
+    """Pre-computed variable classification for fast O(1) lookup."""
+    def __init__(self):
+        self.local = set()       # Variables defined in this function
+        self.closure = set()     # Variables captured from outer scopes
+        self.global_only = set() # Variables that are global
+
+    def classify(self, name):
+        if name in self.local:
+            return 'local'
+        if name in self.closure:
+            return 'closure'
+        return 'global'
+
+
 class ViGoFunction:
     def __init__(self, name, params, defaults, rest_param, body, closure, src=None):
         self.name = name
@@ -17,6 +32,7 @@ class ViGoFunction:
         self.closure = closure
         self.source_file = src
         self.is_static = False
+        self.symbol_table = None  # Set by _build_symbol_table after parsing
 
     def __repr__(self):
         return f"🎯 {self.name}"

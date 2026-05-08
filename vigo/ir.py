@@ -136,9 +136,32 @@ class IRBuilder:
         self._emit("IR_NEG" if node.op == '-' else "IR_NOT", [operand_temp], t)
         return t
 
+    # Builtin function inlining table: func_name -> (IR_opcode, expected_arg_count)
+    INLINE_FUNCS = {
+        'sqrt': ('IR_SQRT', 1),
+        'abs': ('IR_ABS', 1),
+        'len': ('IR_LEN', 1),
+        'int': ('IR_TO_INT', 1),
+        'float': ('IR_TO_FLOAT', 1),
+        'str': ('IR_TO_STR', 1),
+        'round': ('IR_ROUND', 2),
+        'floor': ('IR_FLOOR', 1),
+        'ceil': ('IR_CEIL', 1),
+    }
+
     def _visit_call(self, node):
-        args_temps = [self._visit_expr(a) for a in node.args]
         name = node.name.name if isinstance(node.name, Variable) else str(node.name)
+
+        # Check for inlined builtin
+        if name in self.INLINE_FUNCS:
+            opcode, expected = self.INLINE_FUNCS[name]
+            if len(node.args) == expected or (expected == 2 and len(node.args) >= 1):
+                args_temps = [self._visit_expr(a) for a in node.args]
+                t = self._new_temp()
+                self._emit(opcode, args_temps, t)
+                return t
+
+        args_temps = [self._visit_expr(a) for a in node.args]
         t = self._new_temp()
         self._emit(IR_CALL, [name] + args_temps, t)
         return t
@@ -252,12 +275,76 @@ class IRBuilder:
 
 
 class IROptimizer:
-    """Optimize IR: constant folding, dead code elimination."""
+    """Optimize IR: constant folding, dead code elimination, temp inlining."""
 
     def optimize(self, instructions):
-        # Pass 1: Dead code elimination — remove temps never used
-        optimized = self._eliminate_dead_code(instructions)
+        # Pass 1: Inline single-use temp variables
+        optimized = self._inline_single_use_temps(instructions)
+        # Pass 2: Dead code elimination — remove temps never used
+        optimized = self._eliminate_dead_code(optimized)
         return optimized
+
+    def _inline_single_use_temps(self, instructions):
+        """
+        If a temp is only referenced once (as an operand in another instruction),
+        replace that operand with the temp's value directly, and remove the
+        original IR_LOAD_CONST instruction.
+        
+        Example:
+            t1 = IR_LOAD_CONST 14
+            x = IR_STORE [name, t1]
+        Becomes:
+            x = IR_STORE [name, 14]
+        """
+        # Count how many times each temp is used as an operand
+        use_counts = {}
+        temp_defs = {}  # temp_name -> (index, instruction)
+
+        for i, inst in enumerate(instructions):
+            # Record definition
+            if inst.result and inst.result.startswith('t'):
+                temp_defs[inst.result] = (i, inst)
+            # Count uses in operands
+            for op in inst.operands:
+                if isinstance(op, str) and op.startswith('t'):
+                    use_counts[op] = use_counts.get(op, 0) + 1
+
+        # Find temps that are defined by IR_LOAD_CONST and used exactly once
+        inlineable = set()
+        for temp_name, (idx, inst) in temp_defs.items():
+            if inst.opcode == IR_LOAD_CONST and use_counts.get(temp_name, 0) == 1:
+                inlineable.add(temp_name)
+
+        if not inlineable:
+            return instructions
+
+        # Build new instruction list with inlining applied
+        result = []
+        for inst in instructions:
+            # Skip the IR_LOAD_CONST instructions being inlined
+            if inst.result in inlineable and inst.opcode == IR_LOAD_CONST:
+                continue
+
+            # Replace operand references with actual constant values
+            new_operands = []
+            for op in inst.operands:
+                if isinstance(op, str) and op in inlineable:
+                    # Look up the constant value from the original instruction
+                    const_val = self._find_const_value(instructions, op)
+                    new_operands.append(const_val)
+                else:
+                    new_operands.append(op)
+
+            result.append(IRInstruction(inst.opcode, new_operands, inst.result))
+
+        return result
+
+    def _find_const_value(self, instructions, temp_name):
+        """Find the constant value assigned to a temp by IR_LOAD_CONST."""
+        for inst in reversed(instructions):
+            if inst.result == temp_name and inst.opcode == IR_LOAD_CONST:
+                return inst.operands[0] if inst.operands else None
+        return temp_name  # fallback: keep as-is
 
     def _eliminate_dead_code(self, instructions):
         """Remove instructions whose result temp is never used by any later instruction."""

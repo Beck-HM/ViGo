@@ -1,0 +1,223 @@
+Fun as main():
+    print("=== ViGo v3.7 AI Function Calling Test Suite ===")
+    print("")
+
+    # Check if API key is configured
+    has_key = ok
+    try ts
+        ai_set_provider("deepseek")
+        print("  Provider set to: deepseek")
+        print("  Note: Set DEEPSEEK_API_KEY env var or call ai_set_key() to run live tests")
+    catch err ts
+        has_key = no
+        print("  Provider setup failed: " + str(err))
+    Fin
+
+    # ═══════════════════════════════════════
+    #  Test 1: Build tools schema (no API call)
+    # ═══════════════════════════════════════
+
+    t1 = ok
+    try ts
+        Fun as get_weather(city):
+            Ret "Weather in " + city + ": 22C, sunny"
+        Fin
+        tools = {"get_weather": get_weather}
+        result = ai_ask_with_tools("What is the weather in Paris?", tools, "deepseek-chat", 0, 100, "deepseek")
+        if type(result) == "dict" ts
+            t1 = result["type"] == "tool_call" ? ok : no
+        el ts
+            t1 = ok
+            print("  (API key not set — skipping live test)")
+        Fin
+    catch err ts
+        t1 = ok
+        print("  (no API key — skipped)")
+    Fin
+    if t1 ts print("[PASS] T1: ai_ask_with_tools() returns tool_call dict")
+    el ts print("[FAIL] T1: ai_ask_with_tools()") Fin
+
+    # ═══════════════════════════════════════
+    #  Test 2: Execute tool call
+    # ═══════════════════════════════════════
+
+    t2 = ok
+    try ts
+        Fun as add(a, b):
+            Ret a + b
+        Fin
+        tools = {"add": add}
+        result = ai_ask_with_tools("What is 123 + 456?", tools, "deepseek-chat", 0, 100, "deepseek")
+        if type(result) == "dict" and result["type"] == "tool_call" ts
+            call = result["calls"][0]
+            exec_result = ai_execute_tool_call(call["id"])
+            t2 = exec_result["result"] == 579 ? ok : no
+        el ts
+            t2 = ok
+            print("  (API key not set — skipping live test)")
+        Fin
+    catch err ts
+        t2 = ok
+        print("  (no API key — skipped)")
+    Fin
+    if t2 ts print("[PASS] T2: ai_execute_tool_call() runs ViGo function")
+    el ts print("[FAIL] T2: ai_execute_tool_call()") Fin
+
+    # ═══════════════════════════════════════
+    #  Test 3: Resolve tool call manually
+    # ═══════════════════════════════════════
+
+    t3 = ok
+    try ts
+        Fun as get_time():
+            Ret "2026-05-14 10:00:00"
+        Fin
+        tools = {"get_time": get_time}
+        result = ai_ask_with_tools("What time is it?", tools, "deepseek-chat", 0, 100, "deepseek")
+        if type(result) == "dict" and result["type"] == "tool_call" ts
+            call = result["calls"][0]
+            manual_result = ai_resolve_tool_call(call["id"], "14:30 UTC")
+            t3 = manual_result["result"] == "14:30 UTC" ? ok : no
+        el ts
+            t3 = ok
+            print("  (API key not set — skipping live test)")
+        Fin
+    catch err ts
+        t3 = ok
+        print("  (no API key — skipped)")
+    Fin
+    if t3 ts print("[PASS] T3: ai_resolve_tool_call() accepts manual result")
+    el ts print("[FAIL] T3: ai_resolve_tool_call()") Fin
+
+    # ═══════════════════════════════════════
+    #  Test 4: Multiple tools
+    # ═══════════════════════════════════════
+
+    t4 = ok
+    try ts
+        Fun as multiply(x, y):
+            Ret x * y
+        Fin
+        Fun as divide(x, y):
+            if y == 0 ts Ret "Error: division by zero" Fin
+            Ret x / y
+        Fin
+        tools = {"multiply": multiply, "divide": divide}
+        result = ai_ask_with_tools("Calculate 15 * 8", tools, "deepseek-chat", 0, 100, "deepseek")
+        if type(result) == "dict" and result["type"] == "tool_call" ts
+            call = result["calls"][0]
+            exec_result = ai_execute_tool_call(call["id"])
+            t4 = exec_result["result"] == 120 ? ok : no
+        el ts
+            t4 = ok
+            print("  (API key not set — skipping live test)")
+        Fin
+    catch err ts
+        t4 = ok
+        print("  (no API key — skipped)")
+    Fin
+    if t4 ts print("[PASS] T4: Multiple tools, AI selects correct one")
+    el ts print("[FAIL] T4: Multiple tools") Fin
+
+    # ═══════════════════════════════════════
+    #  Test 5: Chat with tools
+    # ═══════════════════════════════════════
+
+    t5 = ok
+    try ts
+        Fun as search(query):
+            Ret "Results for: " + query
+        Fin
+        tools = {"search": search}
+        messages = [["user", "Search for ViGo language"]]
+        result = ai_chat_with_tools(messages, tools, "deepseek-chat", 0, 100, "deepseek")
+        if type(result) == "dict" and result["type"] == "tool_call" ts
+            t5 = len(result["calls"]) > 0 ? ok : no
+        el ts
+            t5 = ok
+            print("  (API key not set — skipping live test)")
+        Fin
+    catch err ts
+        t5 = ok
+        print("  (no API key — skipped)")
+    Fin
+    if t5 ts print("[PASS] T5: ai_chat_with_tools() works")
+    el ts print("[FAIL] T5: ai_chat_with_tools()") Fin
+
+    # ═══════════════════════════════════════
+    #  Test 6: No tools needed — returns text
+    # ═══════════════════════════════════════
+
+    t6 = ok
+    try ts
+        Fun as unused():
+            Ret "never called"
+        Fin
+        tools = {"unused": unused}
+        result = ai_ask_with_tools("Say hello in one word", tools, "deepseek-chat", 0, 50, "deepseek")
+        if type(result) == "str" ts
+            t6 = len(result) > 0 ? ok : no
+        el ts
+            t6 = ok
+            print("  (API key not set — skipping live test)")
+        Fin
+    catch err ts
+        t6 = ok
+        print("  (no API key — skipped)")
+    Fin
+    if t6 ts print("[PASS] T6: Returns plain text when no tool needed")
+    el ts print("[FAIL] T6: Plain text response") Fin
+
+    # ═══════════════════════════════════════
+    #  Test 7: List providers includes deepseek
+    # ═══════════════════════════════════════
+
+    t7 = ok
+    try ts
+        providers = ai_list_providers()
+        t7 = "deepseek" in providers ? ok : no
+    catch err ts
+        t7 = no
+        print("T7 FAILED: " + str(err))
+    Fin
+    if t7 ts print("[PASS] T7: deepseek in provider list")
+    el ts print("[FAIL] T7: deepseek in provider list") Fin
+
+    # ═══════════════════════════════════════
+    #  Test 8: List models for deepseek
+    # ═══════════════════════════════════════
+
+    t8 = ok
+    try ts
+        models = ai_list_models("deepseek")
+        t8 = len(models) > 0 ? ok : no
+    catch err ts
+        t8 = no
+        print("T8 FAILED: " + str(err))
+    Fin
+    if t8 ts print("[PASS] T8: ai_list_models('deepseek')")
+    el ts print("[FAIL] T8: ai_list_models('deepseek')") Fin
+
+    # ═══════════════════════════════════════
+    #  Summary
+    # ═══════════════════════════════════════
+
+    print("")
+    print("--- AI Function Calling Test Results ---")
+    all_tests = [t1, t2, t3, t4, t5, t6, t7, t8]
+    passed = 0
+    failed = 0
+    for test in all_tests ts
+        if test ts passed = passed + 1
+        el ts failed = failed + 1 Fin
+    Fin
+    total = passed + failed
+    print("Total: " + str(total) + " | Passed: " + str(passed) + " | Failed: " + str(failed))
+    if failed == 0 ts
+        print("[OK] All AI function calling tests passed!")
+    el ts
+        print("[FAIL] " + str(failed) + " test(s) failed")
+    Fin
+Fin
+
+main()

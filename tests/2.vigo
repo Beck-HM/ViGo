@@ -1,0 +1,111 @@
+Fun as main():
+    print("=== ViGo v3.7 Performance Benchmark ===")
+    print("")
+
+    # Test 1: Loop intensive
+    start = time()
+    total = 0
+    for i in 1..10000 ts
+        total = total + i
+    Fin
+    loop_time = time() - start
+    print("Loop 10000: " + str(total) + " | Time: " + str(loop_time) + "s")
+
+    # Test 2: Tail-recursive fib (TCO)
+    Fun as fib_tail(n, a, b):
+        if n <= 0 ts Ret a Fin
+        Ret fib_tail(n - 1, b, a + b)
+    Fin
+    start = time()
+    result = fib_tail(30, 0, 1)
+    fib_time = time() - start
+    print("Fib(30) tail: " + str(result) + " | Time: " + str(fib_time) + "s")
+
+    # Test 3: List operations
+    start = time()
+    nums = []
+    for i in 1..5000 ts
+        nums.push(i)
+    Fin
+    list_time = time() - start
+    print("List push 5000: " + str(len(nums)) + " | Time: " + str(list_time) + "s")
+
+    # Test 4: String operations
+    start = time()
+    s = ""
+    for i in 1..5000 ts
+        s = s + "a"
+    Fin
+    str_time = time() - start
+    print("String concat 5000: " + str(len(s)) + " | Time: " + str(str_time) + "s")
+
+    # Test 5: Tail sum (TCO)
+    Fun as sum_tail(n, acc):
+        if n <= 0 ts Ret acc Fin
+        Ret sum_tail(n - 1, acc + n)
+    Fin
+    start = time()
+    result = sum_tail(5000, 0)
+    tco_time = time() - start
+    print("Tail sum 5000: " + str(result) + " | Time: " + str(tco_time) + "s")
+
+    print("")
+    print("--- Benchmark Complete ---")
+Fin
+
+main()Fun as main():
+    print("=== ViGo v3.7 Performance Benchmark ===")
+    print("")
+
+    # Test 1: Loop intensive
+    start = time()
+    total = 0
+    for i in 1..10000 ts
+        total = total + i
+    Fin
+    loop_time = time() - start
+    print("Loop 10000: " + str(total) + " | Time: " + str(loop_time) + "s")
+
+    # Test 2: Tail-recursive fib (TCO)
+    Fun as fib_tail(n, a, b):
+        if n <= 0 ts Ret a Fin
+        Ret fib_tail(n - 1, b, a + b)
+    Fin
+    start = time()
+    result = fib_tail(30, 0, 1)
+    fib_time = time() - start
+    print("Fib(30) tail: " + str(result) + " | Time: " + str(fib_time) + "s")
+
+    # Test 3: List operations
+    start = time()
+    nums = []
+    for i in 1..5000 ts
+        nums.push(i)
+    Fin
+    list_time = time() - start
+    print("List push 5000: " + str(len(nums)) + " | Time: " + str(list_time) + "s")
+
+    # Test 4: String operations
+    start = time()
+    s = ""
+    for i in 1..5000 ts
+        s = s + "a"
+    Fin
+    str_time = time() - start
+    print("String concat 5000: " + str(len(s)) + " | Time: " + str(str_time) + "s")
+
+    # Test 5: Tail sum (TCO)
+    Fun as sum_tail(n, acc):
+        if n <= 0 ts Ret acc Fin
+        Ret sum_tail(n - 1, acc + n)
+    Fin
+    start = time()
+    result = sum_tail(5000, 0)
+    tco_time = time() - start
+    print("Tail sum 5000: " + str(result) + " | Time: " + str(tco_time) + "s")
+
+    print("")
+    print("--- Benchmark Complete ---")
+Fin
+
+main()

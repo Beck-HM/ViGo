@@ -1,7 +1,7 @@
 # ViGo
 
 <p align="center">
-  <img src="vigo.png" width="700" alt="Auto Agent Result">
+  <img src="vigo.png" width="400" alt="Auto Agent Result">
 </p>
 
 **The AI Scripting Language.**
@@ -546,6 +546,3 @@ ViGo is under active development. Contributions are welcome:
 4. Submit a pull request
 
 ---
-
-**The AI Scripting Language.**
-```

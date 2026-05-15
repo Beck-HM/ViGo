@@ -32,9 +32,8 @@ def build_headers(client):
 
 
 def make_request(client, messages, model, temp, max_tokens, stream=False, provider=None):
-    config, provider_name = get_provider_config(provider or client.provider, client.base_url)
     """Execute an API request against the configured provider."""
-    config, provider_name = get_provider_config(client.provider, client.base_url)
+    config, provider_name = get_provider_config(provider or client.provider, client.base_url)
     url = build_url(client)
     headers = build_headers(client)
 

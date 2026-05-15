@@ -4,7 +4,7 @@ from ..parser.parser import Parser
 from ..parser.ast_nodes import *
 from .environment import Environment
 from .objects import (BuiltinFunction, ViGoFunction, LambdaFunction, ViGoClass, ViGoInstance, ViGoEnum)
-from .errors import (ViGoError, ReturnException, BreakException, ContinueException, AwaitException)
+from .errors import (ViGoError, ReturnException, BreakException, ContinueException, AwaitException, TailCallException)
 from .builtins import register as register_builtins
 from .blocks import eval_block, is_truthy, eval_if, eval_for_in, eval_loop, eval_do_while, eval_switch, eval_try, eval_listcomp
 
@@ -159,6 +159,15 @@ class Interpreter:
         if isinstance(operand, str) and operand in temps:
             return temps[operand]
         return operand
+
+    def _n(self, v):
+        """Convert value to number for math operations."""
+        if isinstance(v, (int, float)):
+            return v
+        if isinstance(v, str):
+            try: return float(v)
+            except: return 0
+        return 0
 
     # ── Block execution helpers (delegated to runtime/blocks.py) ──
 
@@ -356,7 +365,12 @@ class Interpreter:
         return LambdaFunction(node.params, node.body, env)
 
     def _eval_ReturnStmt(self, node, env):
-        raise ReturnException(self.eval(node.value, env))
+        value = node.value
+        # Tail-call optimization: detect tail-position function calls
+        if isinstance(value, FuncCall):
+            func, args, func_name, this_obj = self._prepare_call(value, env)
+            raise TailCallException(func, args, env, func_name, this_obj)
+        raise ReturnException(self.eval(value, env))
 
     def _eval_FuncCall(self, node, env):
         return self._func_call(node, env)
@@ -523,7 +537,8 @@ class Interpreter:
         cls = ViGoClass(node.name, parent, body, cls_env, self.source_file)
         env.define(node.name, cls); return cls
 
-    def _func_call(self, node, env):
+    def _prepare_call(self, node, env):
+        """Resolve a FuncCall node into (func, args, func_name, this_obj) without invoking."""
         args = [self.eval(a, env) for a in node.args]
         func = None; func_name = '<unknown>'; this_obj = None
         if isinstance(node.name, DotAccess):
@@ -546,6 +561,10 @@ class Interpreter:
             func = env.lookup(node.name.name); func_name = node.name.name
         else:
             func = self.eval(node.name, env)
+        return func, args, func_name, this_obj
+
+    def _func_call(self, node, env, tail_position=False):
+        func, args, func_name, this_obj = self._prepare_call(node, env)
 
         # before_func_call hook
         for hook in self.hooks.get("before_func_call", []):
@@ -554,7 +573,7 @@ class Interpreter:
             except Exception:
                 pass
 
-        result = self._call(func, args, env, func_name, this_obj)
+        result = self._call(func, args, env, func_name, this_obj, tail_position=tail_position)
 
         # after_func_call hook
         for hook in self.hooks.get("after_func_call", []):
@@ -565,45 +584,104 @@ class Interpreter:
 
         return result
 
-    def _call(self, func, args, env, func_name, this_obj=None):
-        if self.call_depth > self.MAX_CALL_DEPTH: raise ViGoError("Maximum call depth exceeded")
+    def _call(self, func, args, env, func_name, this_obj=None, tail_position=False):
+
         if isinstance(func, BuiltinFunction):
             return func.func(*args)
+
         elif isinstance(func, (ViGoFunction, LambdaFunction)):
-            final_args = list(args); expected = len(func.params)
+            final_args = list(args)
+            expected = len(func.params)
+
             while len(final_args) < expected:
                 pn = func.params[len(final_args)]
-                if pn in func.defaults: final_args.append(self.eval(func.defaults[pn], env))
-                else: raise ViGoError(f"Function '{func_name}' Missing parameter '{pn}'")
+                if pn in func.defaults:
+                    final_args.append(self.eval(func.defaults[pn], env))
+                else:
+                    raise ViGoError(f"Function '{func_name}' missing parameter '{pn}'")
+
             if func.rest_param and len(final_args) > expected:
                 final_args = final_args[:expected] + [final_args[expected:]]
+
             call_env = Environment(func.closure)
-            # Attach symbol table for fast variable lookup
             if hasattr(func, 'symbol_table') and func.symbol_table is not None:
                 call_env.symbol_table = func.symbol_table
+
             if this_obj is not None:
                 call_env.define('this', this_obj)
-            for p, a in zip(func.params, final_args[:expected]): call_env.define(p, a)
-            if func.rest_param: call_env.define(func.rest_param, final_args[expected] if len(final_args) > expected else [])
-            self.call_depth += 1; self.call_trace.append(f"{func_name}()")
-            try: return eval_block(self, func.body, call_env)
-            except ReturnException as r: return r.value
+
+            for p, a in zip(func.params, final_args[:expected]):
+                call_env.define(p, a)
+
+            if func.rest_param:
+                call_env.define(func.rest_param, final_args[expected] if len(final_args) > expected else [])
+
+            self.call_depth += 1
+            self.call_trace.append(f"{func_name}()")
+
+            try:
+                # Trampoline loop: keeps re-entering the function body for tail calls.
+                # Supports both self-recursion and mutual recursion by always reusing
+                # the current call_env frame for ANY tail call, regardless of function identity.
+                current_func = func
+                while True:
+                    try:
+                        return eval_block(self, current_func.body, call_env)
+                    except TailCallException as tc:
+                        # Mutual recursion: different function, do a real call
+                        if tc.func is not current_func:
+                            self.call_depth -= 1
+                            if self.call_trace:
+                                self.call_trace.pop()
+                            return self._call(tc.func, tc.args, tc.env, tc.func_name, tc.this_obj)
+
+                        # Same-function tail recursion: rebind parameters and continue
+                        new_args = list(tc.args)
+                        new_expected = len(current_func.params)
+                        while len(new_args) < new_expected:
+                            pn = current_func.params[len(new_args)]
+                            if pn in current_func.defaults:
+                                new_args.append(self.eval(current_func.defaults[pn], tc.env))
+                            else:
+                                break
+                        if current_func.rest_param and len(new_args) > new_expected:
+                            new_args = new_args[:new_expected] + [new_args[new_expected:]]
+
+                        for p, a in zip(current_func.params, new_args[:new_expected]):
+                            call_env.assign(p, a)
+                        if current_func.rest_param:
+                            rest_val = new_args[new_expected] if len(new_args) > new_expected else []
+                            call_env.assign(current_func.rest_param, rest_val)
+
+                        if self.call_trace:
+                            self.call_trace[-1] = f"{tc.func_name}()"
+                        continue
+                    except ReturnException as r:
+                        return r.value
             finally:
                 self.call_depth -= 1
-                if self.call_trace: self.call_trace.pop()
+                if self.call_trace:
+                    self.call_trace.pop()
+
         elif isinstance(func, ViGoClass):
             inst = ViGoInstance(func, Environment(func.closure))
             if 'init' in func.closure.variables:
                 init_f = func.closure.lookup('init')
                 if isinstance(init_f, ViGoFunction):
-                    ce = Environment(inst.env); ce.define('this', inst)
-                    fa = list(args); exp = len(init_f.params)
+                    ce = Environment(inst.env)
+                    ce.define('this', inst)
+                    fa = list(args)
+                    exp = len(init_f.params)
                     while len(fa) < exp:
                         pn = init_f.params[len(fa)]
-                        if pn in init_f.defaults: fa.append(self.eval(init_f.defaults[pn], env))
-                        else: break
-                    for p, a in zip(init_f.params, fa[:exp]): ce.define(p, a)
-                    self.call_depth += 1; self.call_trace.append(f"{func.name}.init()")
+                        if pn in init_f.defaults:
+                            fa.append(self.eval(init_f.defaults[pn], env))
+                        else:
+                            break
+                    for p, a in zip(init_f.params, fa[:exp]):
+                        ce.define(p, a)
+                    self.call_depth += 1
+                    self.call_trace.append(f"{func.name}.init()")
                     try:
                         eval_block(self, init_f.body, ce)
                     except ReturnException:
@@ -613,8 +691,10 @@ class Interpreter:
                             if k not in inst.env.variables and k != 'this':
                                 inst.env.define(k, v)
                         self.call_depth -= 1
-                        if self.call_trace: self.call_trace.pop()
+                        if self.call_trace:
+                            self.call_trace.pop()
             return inst
+
         raise ViGoError(f"'{func_name}' is not callable")
 
     def _pipe(self, node, env):
@@ -631,12 +711,15 @@ class Interpreter:
 
     def _destructure(self, node, env):
         val = self.eval(node.value, env)
-        if not isinstance(val, (list, tuple)): raise ViGoError("Right side of destructure must be a list")
+        if not isinstance(val, (list, tuple)):
+            raise ViGoError("Right side of destructure must be a list")
         for i, name in enumerate(node.names):
             if isinstance(name, tuple) and name[0] == 'tuple':
                 sub = val[i] if i < len(val) else []
-                for j, sn in enumerate(name[1]): env.define(sn, sub[j] if j < len(sub) else None)
-            else: env.define(name, val[i] if i < len(val) else None)
+                for j, sn in enumerate(name[1]):
+                    env.define(sn, sub[j] if j < len(sub) else None)
+            else:
+                env.define(name, val[i] if i < len(val) else None)
         return val
 
     def _assign(self, node, env):
@@ -645,7 +728,8 @@ class Interpreter:
                 raise ViGoError(f"Cannot modify constant '{node.target.name}'")
             cur = env.lookup(node.target.name)
             nv = self._apply_assign_op(cur, self.eval(node.value, env), node.op)
-            env.assign(node.target.name, nv); return nv
+            env.assign(node.target.name, nv)
+            return nv
         elif isinstance(node.target, (DotAccess, IndexAccess)):
             return self._complex_assign(node.target, node.op, self.eval(node.value, env), env)
 
@@ -655,29 +739,44 @@ class Interpreter:
             cur = obj.get(target.attr, None) if isinstance(obj, dict) else (
                 obj.env.lookup(target.attr) if isinstance(obj, ViGoInstance) and target.attr in obj.env.variables else None)
             nv = self._apply_assign_op(cur if cur is not None else 0 if op != '=' else None, value, op)
-            if isinstance(obj, dict): obj[target.attr] = nv
-            elif isinstance(obj, ViGoInstance): obj.env.variables[target.attr] = nv
+            if isinstance(obj, dict):
+                obj[target.attr] = nv
+            elif isinstance(obj, ViGoInstance):
+                obj.env.variables[target.attr] = nv
             return nv
         elif isinstance(target, IndexAccess):
-            obj = self.eval(target.object, env); idx = self.eval(target.index, env)
+            obj = self.eval(target.object, env)
+            idx = self.eval(target.index, env)
             cur = obj.get(idx, 0) if isinstance(obj, dict) else (obj[idx] if isinstance(obj, list) and idx < len(obj) else 0)
             nv = self._apply_assign_op(cur, value, op)
-            if isinstance(obj, dict): obj[idx] = nv
+            if isinstance(obj, dict):
+                obj[idx] = nv
             elif isinstance(obj, list):
-                if idx < len(obj): obj[idx] = nv
-                else: obj.append(nv)
+                if idx < len(obj):
+                    obj[idx] = nv
+                else:
+                    obj.append(nv)
             return nv
 
     def _apply_assign_op(self, cur, right, op):
-        if op == '=': return right
-        if cur is None: cur = 0
-        if op == '+=': return str(cur) + str(right) if isinstance(cur, str) or isinstance(right, str) else cur + right
-        elif op == '-=': return cur - right
-        elif op == '*=': return cur * right
+        if op == '=':
+            return right
+        if cur is None:
+            cur = 0
+        if op == '+=':
+            return str(cur) + str(right) if isinstance(cur, str) or isinstance(right, str) else cur + right
+        elif op == '-=':
+            return cur - right
+        elif op == '*=':
+            return cur * right
         elif op == '/=':
-            if right == 0: raise ViGoError("Division by zero"); return cur / right
+            if right == 0:
+                raise ViGoError("Division by zero")
+            return cur / right
         elif op == '%=':
-            if right == 0: raise ViGoError("Modulo by zero"); return cur % right
+            if right == 0:
+                raise ViGoError("Modulo by zero")
+            return cur % right
         return right
 
     @staticmethod
@@ -765,7 +864,7 @@ class Interpreter:
         obj = self.eval(node.object, env); idx = self.eval(node.index, env)
         if isinstance(obj, (str, list)):
             try: return obj[int(idx)]
-            except: raise ViGoError(f"Subscript {idx} Out of range")
+            except: raise ViGoError(f"Subscript {idx} out of range")
         elif isinstance(obj, dict): return obj.get(idx, None)
         elif isinstance(obj, ViGoInstance):
             k = str(idx)
@@ -780,6 +879,53 @@ class Interpreter:
         if isinstance(obj, (list, str)): return obj[start:end]
         raise ViGoError("Slice only supported for lists and strings")
 
+    # Pre-built builtin method factories — created once, reused always.
+    _BUILTIN_METHODS = {
+        (list, 'push'):     lambda obj: BuiltinFunction(lambda item: obj.append(item) or obj, 'push'),
+        (list, 'pop'):      lambda obj: BuiltinFunction(lambda: obj.pop() if obj else None, 'pop'),
+        (list, 'reverse'):  lambda obj: BuiltinFunction(lambda: obj.reverse() or obj, 'reverse'),
+        (list, 'extend'):   lambda obj: BuiltinFunction(lambda other: obj.extend(other) or obj, 'extend'),
+        (list, 'insert'):   lambda obj: BuiltinFunction(lambda idx, item: obj.insert(int(idx), item) or obj, 'insert'),
+        (list, 'remove'):   lambda obj: BuiltinFunction(lambda item: obj.remove(item) if item in obj else None or obj, 'remove'),
+        (list, 'find'):     lambda obj: BuiltinFunction(lambda item: obj.index(item) if item in obj else -1, 'find'),
+        (list, 'sort'):     lambda obj: BuiltinFunction(lambda key=None, reverse=False: obj.sort(key=key, reverse=reverse) or obj, 'sort'),
+        (str, 'upper'):     lambda obj: BuiltinFunction(lambda: obj.upper(), 'upper'),
+        (str, 'lower'):     lambda obj: BuiltinFunction(lambda: obj.lower(), 'lower'),
+        (str, 'trim'):      lambda obj: BuiltinFunction(lambda: obj.strip(), 'trim'),
+        (str, 'split'):     lambda obj: BuiltinFunction(lambda delim: obj.split(delim), 'split'),
+        (str, 'join'):      lambda obj: BuiltinFunction(lambda items: obj.join(items), 'join'),
+        (str, 'replace'):   lambda obj: BuiltinFunction(lambda old, new: obj.replace(old, new), 'replace'),
+        (str, 'startswith'):lambda obj: BuiltinFunction(lambda prefix: obj.startswith(prefix), 'startswith'),
+        (str, 'endswith'):  lambda obj: BuiltinFunction(lambda suffix: obj.endswith(suffix), 'endswith'),
+        (str, 'contains'):  lambda obj: BuiltinFunction(lambda sub: sub in obj, 'contains'),
+        (str, 'find'):      lambda obj: BuiltinFunction(lambda sub: obj.find(sub), 'find'),
+        (str, 'count'):     lambda obj: BuiltinFunction(lambda sub: obj.count(sub), 'count'),
+        (dict, 'keys'):     lambda obj: BuiltinFunction(lambda: list(obj.keys()), 'keys'),
+        (dict, 'values'):   lambda obj: BuiltinFunction(lambda: list(obj.values()), 'values'),
+        (dict, 'get'):      lambda obj: BuiltinFunction(lambda key, default=None: obj.get(key, default), 'get'),
+        (dict, 'items'):    lambda obj: BuiltinFunction(lambda: list(obj.items()), 'items'),
+    }
+
+    # Regex methods (keyed by a sentinel type since re.Pattern may not be available)
+    _REGEX_METHODS = {
+        'test':    lambda obj: BuiltinFunction(lambda s: obj.search(s) is not None, 'test'),
+        'exec':    lambda obj: BuiltinFunction(lambda s: obj.search(s), 'exec'),
+        'findall': lambda obj: BuiltinFunction(lambda s: obj.findall(s), 'findall'),
+    }
+
+    def _get_builtin_method(self, obj, attr):
+        """Return a BuiltinFunction for the given object and attribute, or None."""
+        # Check list/str/dict methods
+        factory = self._BUILTIN_METHODS.get((type(obj), attr))
+        if factory:
+            return factory(obj)
+        # Check regex methods
+        if hasattr(obj, 'pattern'):
+            factory = self._REGEX_METHODS.get(attr)
+            if factory:
+                return factory(obj)
+        return None
+
     def _dot(self, node, env):
         obj = self.eval(node.object, env); attr = node.attr
         if isinstance(obj, ViGoInstance):
@@ -791,40 +937,19 @@ class Interpreter:
                 if m == attr:
                     return v
             raise ViGoError(f"Enum '{obj.name}' has no member '{attr}'")
-        if isinstance(obj, list):
-            if attr == 'push': return BuiltinFunction(lambda item: obj.append(item) or obj, 'push')
-            if attr == 'pop': return BuiltinFunction(lambda: obj.pop() if obj else None, 'pop')
-            if attr == 'reverse': return BuiltinFunction(lambda: obj.reverse() or obj, 'reverse')
-            if attr == 'extend': return BuiltinFunction(lambda other: obj.extend(other) or obj, 'extend')
-            if attr == 'insert': return BuiltinFunction(lambda idx, item: obj.insert(int(idx), item) or obj, 'insert')
-            if attr == 'remove': return BuiltinFunction(lambda item: obj.remove(item) if item in obj else None or obj, 'remove')
-            if attr == 'find': return BuiltinFunction(lambda item: obj.index(item) if item in obj else -1, 'find')
-            if attr == 'sort': return BuiltinFunction(lambda key=None, reverse=False: obj.sort(key=key, reverse=reverse) or obj, 'sort')
-        if isinstance(obj, str):
-            if attr == 'upper': return BuiltinFunction(lambda: obj.upper(), 'upper')
-            if attr == 'lower': return BuiltinFunction(lambda: obj.lower(), 'lower')
-            if attr == 'trim': return BuiltinFunction(lambda: obj.strip(), 'trim')
-            if attr == 'split': return BuiltinFunction(lambda delim: obj.split(delim), 'split')
-            if attr == 'join': return BuiltinFunction(lambda items: obj.join(items), 'join')
-            if attr == 'replace': return BuiltinFunction(lambda old, new: obj.replace(old, new), 'replace')
-            if attr == 'startswith': return BuiltinFunction(lambda prefix: obj.startswith(prefix), 'startswith')
-            if attr == 'endswith': return BuiltinFunction(lambda suffix: obj.endswith(suffix), 'endswith')
-            if attr == 'contains': return BuiltinFunction(lambda sub: sub in obj, 'contains')
-            if attr == 'find': return BuiltinFunction(lambda sub: obj.find(sub), 'find')
-            if attr == 'count': return BuiltinFunction(lambda sub: obj.count(sub), 'count')
-        if hasattr(obj, 'pattern'):  # compiled regex object
-            if attr == 'test':
-                return BuiltinFunction(lambda s: obj.search(s) is not None, 'test')
-            if attr == 'exec':
-                return BuiltinFunction(lambda s: obj.search(s), 'exec')
-            if attr == 'findall':
-                return BuiltinFunction(lambda s: obj.findall(s), 'findall')
+        # Fast path: pre-built method table
+        method = self._get_builtin_method(obj, attr)
+        if method is not None:
+            return method
+        # Dict fallback (non-method access like dict["key"])
         if isinstance(obj, dict):
-            if attr == 'keys': return BuiltinFunction(lambda: list(obj.keys()), 'keys')
-            if attr == 'values': return BuiltinFunction(lambda: list(obj.values()), 'values')
-            if attr == 'get': return BuiltinFunction(lambda key, default=None: obj.get(key, default), 'get')
-            if attr == 'items': return BuiltinFunction(lambda: list(obj.items()), 'items')
             return obj.get(attr, None)
+        # Generic Python object attribute access (e.g. Conversation, custom objects)
+        if hasattr(obj, attr):
+            val = getattr(obj, attr, None)
+            if callable(val):
+                return BuiltinFunction(lambda *a, _f=val, **kw: _f(*a, **kw), attr)
+            return val
         raise ViGoError(f"Dot access '{attr}' not supported on {type(obj).__name__}")
 
     def _interp_str(self, node, env):

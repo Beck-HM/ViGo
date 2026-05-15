@@ -1,12 +1,14 @@
-"""Bytecode instruction definitions"""
-
+"""ViGo Bytecode Instruction Set"""
+# Stack operations
 PUSH = "PUSH"
 POP = "POP"
 DUP = "DUP"
 
+# Variable operations
 LOAD = "LOAD"
 STORE = "STORE"
 
+# Arithmetic
 ADD = "ADD"
 SUB = "SUB"
 MUL = "MUL"
@@ -15,9 +17,12 @@ MOD = "MOD"
 POW = "POW"
 FLOOR_DIV = "FLOOR_DIV"
 NEG = "NEG"
+
+# Logical
 NOT_OP = "NOT_OP"
 AND = "AND"
 
+# Comparison
 EQ = "EQ"
 NEQ = "NEQ"
 LT = "LT"
@@ -25,27 +30,32 @@ GT = "GT"
 LE = "LE"
 GE = "GE"
 
+# Control flow
 JUMP = "JUMP"
 JUMP_IF_FALSE = "JUMP_IF_FALSE"
 JUMP_IF_TRUE = "JUMP_IF_TRUE"
+LABEL = "LABEL"
 
+# Functions
 CALL = "CALL"
 CALL_METHOD = "CALL_METHOD"
 RETURN = "RETURN"
 MAKE_FUNC = "MAKE_FUNC"
-STORE_METHOD = "STORE_METHOD"
 
+# Classes
+STORE_METHOD = "STORE_METHOD"
+GET_ATTR = "GET_ATTR"
+SET_ATTR = "SET_ATTR"
+
+# Data structures
 MAKE_LIST = "MAKE_LIST"
 MAKE_DICT = "MAKE_DICT"
 INDEX = "INDEX"
 
-GET_ATTR = "GET_ATTR"
-SET_ATTR = "SET_ATTR"
-
+# Control
 HALT = "HALT"
-LABEL = "LABEL"
 
-# ── IR-level instructions (for optimization layer) ──
+# IR-level instructions (used by ir_compiler.py)
 IR_LOAD_CONST = "IR_LOAD_CONST"
 IR_ADD = "IR_ADD"
 IR_SUB = "IR_SUB"
@@ -56,7 +66,6 @@ IR_LOAD = "IR_LOAD"
 IR_JUMP_IF_FALSE = "IR_JUMP_IF_FALSE"
 IR_CALL = "IR_CALL"
 IR_RETURN = "IR_RETURN"
-# ── Inlined builtin IR instructions ──
 IR_SQRT = "IR_SQRT"
 IR_ABS = "IR_ABS"
 IR_LEN = "IR_LEN"

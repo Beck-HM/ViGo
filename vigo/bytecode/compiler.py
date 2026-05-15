@@ -35,6 +35,8 @@ class BytecodeCompiler:
     def _compile_statement(self, node):
         if isinstance(node, VarDecl):
             self._compile_expression(node.value)
+            if node.name:
+                self.emit(STORE, node.name)
         elif isinstance(node, FuncDef):
             self._compile_function(node)
             self.emit(STORE, node.name)
@@ -54,8 +56,6 @@ class BytecodeCompiler:
             self._compile_loop(node)
         elif isinstance(node, ForInStmt):
             self._compile_for_in(node)
-        elif isinstance(node, FuncDef):
-            self._compile_function(node)
         elif isinstance(node, ClassDef):
             self._compile_class(node)
         elif isinstance(node, StaticMethodDef):
@@ -65,9 +65,9 @@ class BytecodeCompiler:
         elif isinstance(node, SwitchStmt):
             self._compile_switch(node)
         elif isinstance(node, BreakStmt):
-            pass
+            self.emit(JUMP, "__break__")
         elif isinstance(node, ContinueStmt):
-            pass
+            self.emit(JUMP, "__continue__")
         elif isinstance(node, SureStmt):
             self._compile_expression(node.condition)
         elif isinstance(node, ThrowStmt):
@@ -79,6 +79,12 @@ class BytecodeCompiler:
             self._compile_if(IfStmt(UnaryOp('not', node.condition), node.body, []))
         elif isinstance(node, DoWhileStmt):
             self._compile_loop(LoopStmt(Literal(True), node.body + [IfStmt(UnaryOp('not', node.condition), [BreakStmt()], [])]))
+        elif isinstance(node, PipeExpr):
+            self._compile_expression(node)
+            self.emit(POP)
+        elif isinstance(node, NewExpr):
+            self._compile_expression(node)
+            self.emit(POP)
         else:
             self._compile_expression(node)
             self.emit(POP)
@@ -102,12 +108,15 @@ class BytecodeCompiler:
             self._compile_expression(node.operand)
             self.emit(NEG if node.op == '-' else NOT_OP)
         elif isinstance(node, FuncCall):
-            for arg in node.args:
-                self._compile_expression(arg)
             if isinstance(node.name, Variable):
+                for arg in node.args:
+                    self._compile_expression(arg)
                 self.emit(CALL, node.name.name, len(node.args))
             elif isinstance(node.name, DotAccess):
+                # obj.method(args): push obj first, then args
                 self._compile_expression(node.name.object)
+                for arg in node.args:
+                    self._compile_expression(arg)
                 self.emit(CALL_METHOD, node.name.attr, len(node.args))
         elif isinstance(node, ListLiteral):
             for el in node.elements:
@@ -128,7 +137,7 @@ class BytecodeCompiler:
         elif isinstance(node, LogicalOp):
             self._compile_expression(node.left)
             self._compile_expression(node.right)
-            self.emit(ADD)
+            self.emit(AND if node.op == 'and' else ADD)
         elif isinstance(node, RangeExpr):
             self._compile_expression(node.start)
             self._compile_expression(node.end)
@@ -143,6 +152,19 @@ class BytecodeCompiler:
             self.emit(LOAD, "this")
         elif isinstance(node, LambdaExpr):
             self._compile_function(node)
+        elif isinstance(node, NullCoalesce):
+            else_label = self._new_label()
+            end_label = self._new_label()
+            self._compile_expression(node.left)
+            self.emit(DUP)
+            self.emit(PUSH, self._add_constant(None))
+            self.emit(EQ)
+            self.emit(JUMP_IF_FALSE, else_label)
+            self.emit(POP)
+            self._compile_expression(node.right)
+            self.emit(JUMP, end_label)
+            self.emit(LABEL, else_label)
+            self.emit(LABEL, end_label)
         else:
             self.emit(PUSH, self._add_constant(None))
 
@@ -182,7 +204,14 @@ class BytecodeCompiler:
         self.emit(JUMP_IF_FALSE, end_label)
 
         for stmt in node.body:
-            self._compile_statement(stmt)
+            if isinstance(stmt, BreakStmt):
+                stmt = None
+                self.emit(JUMP, end_label)
+            elif isinstance(stmt, ContinueStmt):
+                stmt = None
+                self.emit(JUMP, start_label)
+            if stmt is not None:
+                self._compile_statement(stmt)
         self.emit(JUMP, start_label)
         self.emit(LABEL, end_label)
 
@@ -208,7 +237,16 @@ class BytecodeCompiler:
         self.emit(STORE, node.var_name)
 
         for stmt in node.body:
-            self._compile_statement(stmt)
+            if isinstance(stmt, BreakStmt):
+                self.emit(JUMP, end_label)
+            elif isinstance(stmt, ContinueStmt):
+                self.emit(LOAD, "_idx")
+                self.emit(PUSH, self._add_constant(1))
+                self.emit(ADD)
+                self.emit(STORE, "_idx")
+                self.emit(JUMP, start_label)
+            else:
+                self._compile_statement(stmt)
 
         self.emit(LOAD, "_idx")
         self.emit(PUSH, self._add_constant(1))
@@ -226,7 +264,7 @@ class BytecodeCompiler:
             "code": func_compiler.code,
             "constants": func_compiler.constants,
             "labels": func_compiler.labels,
-            "params": node.params,
+            "params": node.params if hasattr(node, 'params') else [],
             "name": node.name if hasattr(node, 'name') else '<lambda>',
         }
         self.emit(MAKE_FUNC, self._add_constant(func_bytecode))
@@ -308,6 +346,8 @@ class BytecodeCompiler:
         self.emit(LABEL, end_label)
 
     def _compile_pipe(self, node):
+        # Compile: left |> right(args)
+        # Stack order: left, arg1, arg2, ... → CALL with arg_count + 1
         if isinstance(node.right, FuncCall):
             call = node.right
             if isinstance(call.name, Variable):
@@ -315,6 +355,13 @@ class BytecodeCompiler:
                 for arg in call.args:
                     self._compile_expression(arg)
                 self.emit(CALL, call.name.name, len(call.args) + 1)
+            elif isinstance(call.name, DotAccess):
+                # left |> obj.method(args)
+                self._compile_expression(node.left)
+                self._compile_expression(call.name.object)
+                for arg in call.args:
+                    self._compile_expression(arg)
+                self.emit(CALL_METHOD, call.name.attr, len(call.args) + 1)
         elif isinstance(node.right, Variable):
             self._compile_expression(node.left)
             self.emit(CALL, node.right.name, 1)

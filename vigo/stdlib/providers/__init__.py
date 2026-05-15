@@ -6,12 +6,16 @@ PROVIDERS = {
         "auth_header": "Authorization",
         "auth_prefix": "Bearer ",
         "message_format": "openai",
+        "embedding_url": "https://api.openai.com/v1/embeddings",
+        "embedding_model": "text-embedding-ada-002",
     },
     "deepseek": {
         "url": "https://api.deepseek.com/v1/chat/completions",
         "auth_header": "Authorization",
         "auth_prefix": "Bearer ",
         "message_format": "openai",
+        "embedding_url": "https://api.deepseek.com/v1/embeddings",
+        "embedding_model": "deepseek-embedding",
     },
     "groq": {
         "url": "https://api.groq.com/openai/v1/chat/completions",
@@ -31,12 +35,16 @@ PROVIDERS = {
         "auth_header": "Authorization",
         "auth_prefix": "Bearer ",
         "message_format": "openai",
+        "embedding_url": "https://api.mistral.ai/v1/embeddings",
+        "embedding_model": "mistral-embed",
     },
     "together": {
         "url": "https://api.together.xyz/v1/chat/completions",
         "auth_header": "Authorization",
         "auth_prefix": "Bearer ",
         "message_format": "openai",
+        "embedding_url": "https://api.together.xyz/v1/embeddings",
+        "embedding_model": "togethercomputer/m2-bert-80M-8k-retrieval",
     },
     "fireworks": {
         "url": "https://api.fireworks.ai/inference/v1/chat/completions",
@@ -55,6 +63,8 @@ PROVIDERS = {
         "auth_header": "Authorization",
         "auth_prefix": "Bearer ",
         "message_format": "cohere",
+        "embedding_url": "https://api.cohere.com/v1/embed",
+        "embedding_model": "embed-english-v3.0",
     },
     "grok": {
         "url": "https://api.x.ai/v1/chat/completions",
@@ -79,6 +89,8 @@ PROVIDERS = {
         "auth_header": "Authorization",
         "auth_prefix": "Bearer ",
         "message_format": "openai",
+        "embedding_url": "https://generativelanguage.googleapis.com/v1beta/openai/embeddings",
+        "embedding_model": "text-embedding-004",
     },
     "openrouter": {
         "url": "https://openrouter.ai/api/v1/chat/completions",
@@ -92,6 +104,8 @@ PROVIDERS = {
         "auth_header": None,
         "auth_prefix": None,
         "message_format": "openai",
+        "embedding_url": "http://localhost:11434/api/embeddings",
+        "embedding_model": "nomic-embed-text",
     },
     "lmstudio": {
         "url": "http://localhost:1234/v1/chat/completions",

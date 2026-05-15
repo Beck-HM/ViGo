@@ -54,6 +54,7 @@ class Parser:
         self.current_token = state[4]
 
     # ── Block parsing helper ──
+    # ── Block parsing helper ──
     def _parse_block(self, terminators=None):
         """Parse statements until a terminator token or Fin at depth 0.
         Returns (body, fin_consumed, stopped_on).
@@ -326,45 +327,26 @@ class Parser:
     # ── switch ──
     def parse_switch_stmt(self):
         self.eat(TokenType.SWITCH)
-        # Parse the switch expression (e.g., `switch x ts`)
         expr = self.parse_expression()
         self.eat(TokenType.TS)
 
         cases = []
         default_body = []
-        depth = 1
-        fin_consumed = False
 
-        # Main loop: iterate through all case/default blocks until the outer Fin
-        while depth > 0:
+        while self.current_token.type != TokenType.EOF:
             t = self.current_token
 
-            # Nested ts inside case body — increase depth so outer Fin won't close early
-            if t.type == TokenType.TS:
-                depth += 1
-                self.eat(TokenType.TS)
-
-            # Fin at depth 0 closes the entire switch; deeper Fins close inner blocks
-            elif t.type == TokenType.FIN:
-                depth -= 1
-                if depth == 0:
-                    self.eat(TokenType.FIN)
-                    fin_consumed = True
-                    break
+            # Closing Fin for the entire switch
+            if t.type == TokenType.FIN:
                 self.eat(TokenType.FIN)
+                break
 
-            elif t.type == TokenType.EOF:
-                self.error("switch missing Fin")
-
-            # Case block: parse value, eat its ts, delegate body to _parse_block
-            elif t.type == TokenType.CASE:
+            if t.type == TokenType.CASE:
                 self.eat(TokenType.CASE)
 
-                # Case value can be a number, a range (num..num), a string, or a literal
                 if self.current_token.type == TokenType.NUMBER:
                     start = self.current_token.value
                     self.eat(TokenType.NUMBER)
-                    # Range matching: `case 0..59 ts`
                     if self.current_token.type == TokenType.RANGE:
                         self.eat(TokenType.RANGE)
                         end = self.current_token.value
@@ -378,21 +360,31 @@ class Parser:
                 else:
                     case_val = self.eval_literal()
 
-                # Eat the ts that opens this case's body
                 self.eat(TokenType.TS)
-                # _parse_block stops at next CASE, DEFAULT, or the outer Fin
-                case_body, _, _ = self._parse_block(terminators={TokenType.CASE, TokenType.DEFAULT})
-                cases.append((case_val, case_body))
 
-            # Default block: same logic as case but with empty terminators
+                body = []
+                # Collect until CASE, DEFAULT, or EOF.
+                # FIN here closes the *case*, not the switch.
+                while self.current_token.type not in (TokenType.CASE, TokenType.DEFAULT, TokenType.EOF):
+                    if self.current_token.type == TokenType.FIN:
+                        # This Fin closes the current case body
+                        self.eat(TokenType.FIN)
+                        break
+                    body.append(self.parse_statement())
+                cases.append((case_val, body))
+
             elif t.type == TokenType.DEFAULT:
                 self.eat(TokenType.DEFAULT)
                 self.eat(TokenType.TS)
-                # Default always runs to the outer Fin (no case/default terminators)
-                default_body, _, _ = self._parse_block(terminators=set())
+
+                while self.current_token.type != TokenType.EOF:
+                    if self.current_token.type == TokenType.FIN:
+                        # This Fin closes the default body (and the switch)
+                        self.eat(TokenType.FIN)
+                        break
+                    default_body.append(self.parse_statement())
 
             else:
-                # Skip any unexpected tokens inside switch block
                 self.eat(t.type)
 
         self.optional_semicolon()

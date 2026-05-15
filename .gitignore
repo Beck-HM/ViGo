@@ -4,3 +4,6 @@ installer.py
 build_installer.bat
 vigo.ico*.gguf 
 *.ico 
+vigo-dev/ 
+*.txt 
+tests/

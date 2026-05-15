@@ -34,13 +34,11 @@ class ViGoREPL:
     def _setup_history(self):
         if not _HAS_READLINE:
             return
-        # Load existing history
         try:
             if os.path.exists(_HISTORY_FILE):
                 readline.read_history_file(_HISTORY_FILE)
         except Exception:
             pass
-        # Save history on exit
         atexit.register(self._save_history)
 
     def _save_history(self):
@@ -66,7 +64,7 @@ class ViGoREPL:
    \ \/\/ /| | (_ | (_) |
     \_/\_/ |_|\___|\___/
 
-  ViGo v3.5 REPL
+  ViGo v3.7 REPL
   Type .exit or .quit to leave, .help for commands
 """)
         while self.running:
@@ -84,7 +82,7 @@ class ViGoREPL:
     def _read_multiline(self):
         """Read input, continuing across lines if ts blocks are unclosed."""
         lines = []
-        depth = 0  # ts depth counter
+        depth = 0
         first_prompt = self.prompt
 
         while True:
@@ -96,20 +94,17 @@ class ViGoREPL:
 
             line = raw.strip()
 
-            # Handle REPL commands (.exit, .quit, .help, .clear)
             if not lines and line.startswith("."):
                 self._handle_command(line)
                 return None
 
             lines.append(raw)
 
-            # Count ts / Fin in the accumulated text
             full = "\n".join(lines)
             depth = self._count_ts_depth(full)
 
             if depth <= 0:
                 return full
-            # depth > 0 means we need more input; loop continues
 
     def _count_ts_depth(self, source):
         """Count unclosed ts blocks by tokenizing and tracking ts/Fin."""
@@ -138,7 +133,6 @@ class ViGoREPL:
             result = self.interpreter.interpret(program)
             if result is not None:
                 self.last_result = result
-                # Also define _ in the global environment
                 self.interpreter.global_env.variables["_"] = result
                 print(result)
         except ViGoError as e:

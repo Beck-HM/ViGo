@@ -1,17 +1,21 @@
-```markdown
 # ViGo
 
+<p align="center">
+  <img src="vigo.png" width="700" alt="Auto Agent Result">
+</p>
+
 **The AI Scripting Language.**
-**The first test version, the latest release**
+**v3.8 Stable Beta**
 
 ViGo is a lightweight, embeddable scripting language purpose-built for AI workflows.
 Concise syntax, native pipe operator, optional chaining, null coalescing, and a
-batteries-included standard library spanning AI agents, RAG retrieval, image generation,
-cron scheduling, and more.
+batteries-included standard library spanning **41 modules** — from AI agents and RAG
+retrieval to concurrency, sandboxing, and scientific computing.
 
-- **Three execution modes:** Tree-walk interpreter, Cython-compiled, Python transpiler (native speed)
+- **Three execution modes:** Tree-walk interpreter, Bytecode VM, Python transpiler (native speed)
+- **Transpiler: 10–30x faster** than interpreter
 - **Pure core:** ~950 KB Python source, zero external dependencies beyond stdlib
-- **55/55 regression tests passing**
+- **99/99 regression tests passing** · **32/32 Embedded tests** · **14/14 Extended stdlib tests**
 
 ---
 
@@ -21,15 +25,12 @@ cron scheduling, and more.
 Fun as greet(name):
     Ret "Hello, {name}!"
 Fin
+print(greet("World") |> upper())
 
-print(greet("World"))  |>  upper()
+# Output: HELLO, WORLD!
 ```
 
-```
-HELLO, WORLD!
-```
-
-### AI in 3 lines
+### AI in 3 Lines
 
 ```vigo
 ai_set_key("sk-...")
@@ -37,7 +38,7 @@ answer = "What is the capital of France?" |> ai_ask()
 print(answer)
 ```
 
-### Agent with tools
+### Agent with Tools
 
 ```vigo
 agent = ai_agent("gpt-4o")
@@ -46,39 +47,126 @@ result = agent |> ai_agent_run("Calculate 2^10 and tell me the result")
 print(result)
 ```
 
+### Sandboxed AI Execution
+
+```vigo
+result = sandbox_run("ai_ask('What is 2+2?')", {"timeout": 10, "max_memory": 256})
+print(result["stdout"])
+```
+
+### Parallel Processing
+
+```vigo
+pool = TaskPool(8, "thread")
+results = pool.map(str, [1, 2, 3, 4, 5])
+pool.shutdown()
+```
+
+---
+
+## What's New in v3.8
+
+### 🚀 Performance
+- **Transpiler mode**: 10–30x faster than interpreter
+- Tail-call optimization (TCO) for deep recursion
+- Bytecode VM with full class and pipe support
+- IR optimization: constant folding, dead code elimination, builtin inlining
+- Hook system for community extensions (5 hooks)
+
+### 🧠 AI Expansion (85+ functions)
+- **Function Calling** — `ai_ask_with_tools`, `ai_register_function`, `ai_execute_tool_call`
+- **Embeddings** — `ai_embed`, `ai_embed_batch`
+- **Structured Output** — `ai_ask_json`, `ai_extract`
+- **Vision** — `ai_vision`, `ai_ask_multimodal` (text + images + audio + video)
+- **Batch & Streaming** — `ai_batch`, `ai_batch_async`, `ai_stream`
+- **Evaluation** — `ai_evaluate`, `ai_compare`, `ai_debate`
+- **RAG Integration** — `ai_rag_ask`, `ai_rag_chat`, `ai_create_knowledge_base`
+- **Web Search** — `ai_web_search`, `ai_web_search_ask`, `ai_news_search`
+- **AI Chart Generation** — `ai_generate_chart` (bar/line/pie/scatter/auto)
+- **Conversation Management** — branch, rollback, summarize, compress
+- **Token Counting** — `ai_count_tokens`, `ai_token_cost`
+- **Semantic Cache** — `Cache`, `cache_store`, `cache_recall`
+- **Model Management** — `ai_list_models_live`, `ai_model_info`
+- **20 AI Providers** — OpenAI, Claude, DeepSeek, Groq, Mistral, Ollama, and 14 more
+
+### 📦 New Standard Library Modules (15 new, 41 total)
+
+| Module | Description | Functions |
+|--------|-------------|-----------|
+| `scilib` | Scientific computing (stats, vectors, matrices, calculus) | 29 |
+| `fmtlib` | Data formats (YAML/TOML/XML/CSV/INI) | 20 |
+| `seclib` | Security & cryptography (AES, JWT, bcrypt, HMAC) | 20 |
+| `multilib` | Multimedia (images/audio/video) | 14 |
+| `cloudlib` | Cloud storage (S3, presigned URLs) | 8 |
+| `vislib` | Data visualization (bar/line/pie/scatter/histogram) | 6 |
+| `concurrentlib` | Concurrency (Lock, Workload, Asyn, TaskPool, Queue) | 7 |
+| `cachelib` | Semantic caching with embedding similarity | 10 |
+| `streamlib` | Lazy stream processing (map/filter/chunk/dedupe) | 13 |
+| `proflib` | Performance profiling & benchmarking | 3 |
+| `pipelinelib` | ETL data pipelines | 7 |
+| `packlib` | Binary serialization (MessagePack/CBOR/BSON) | 2 |
+| `watchlib` | File system watcher with callbacks | 5 |
+| `sandboxlib` | Sandboxed code execution with resource limits | 1 |
+| `netlib` (extended) | TCP/UDP/DNS added | 19 total |
+
+### 🏖️ Sandbox
+- Process isolation via subprocess
+- Resource limits (CPU/memory)
+- File system & network restrictions
+- Restricted builtins (no `__import__`, `exec`, `eval`)
+- Timeout control
+
+### 🔌 ViGo Embedded (C API)
+- C API for embedding ViGo in C/C++/Rust/Go/Python applications
+- Lifecycle: `vigo_init`, `vigo_destroy`, `vigo_reset`
+- Code execution: `vigo_eval`, `vigo_eval_file`, `vigo_eval_bool`, `vigo_eval_string`, `vigo_eval_number`
+- Function registration: `vigo_register`, `vigo_call`
+- AI integration: `vigo_ai_ask`, `vigo_ai_create_agent`, `vigo_ai_agent_run`
+- Value type system: null, bool, number, string, list
+- 17 source files, 32/32 tests passing
+
+### 🐛 Bug Fixes (v3.7 → v3.8)
+- Pipe operator semantic consistency across interpreter and transpiler
+- TCO closure capture (nested functions with tail calls now work correctly)
+- Switch parser edge cases with nested blocks
+- Provider parameter passed correctly in `make_request`
+- Transpiler method name mapping (`push` → `append`, etc.)
+- Cross-eval function registration via persistent registry
+
+---
+
 ## Changelog
 
+### v3.8 (Stable Beta) — 2026-05-15
+- 15 new standard library modules (41 total)
+- 85+ AI functions across 14 capability modules
+- Sandbox with process isolation and resource limits
+- ViGo Embedded C API with 32 passing tests
+- Concurrency library with true parallel execution (300x speedup)
+- Semantic caching with embedding similarity
+- Stream processing, ETL pipelines, file watching, binary serialization
+- Performance profiling and benchmarking
+- TCO closure fix, switch parser fix, pipe semantic fix
+
+### v3.7 (Beta) — 2026-05-05
+- TCO (Tail Call Optimization)
+- IR optimization layer with constant folding and dead code elimination
+- Hook system for community extensions
+- Bytecode VM with class and pipe support
+- Switch parser edge case fixes
+- Transpiler: 10-30x performance improvement
+- Package Manager: `vigo install`, `vigo uninstall`, `vigo list`, `vigo publish`
+
 ### v3.6 (Stable Beta) — 2026-05-04
-
-See [RM3.md](RM3.md) for the full v3.6 release notes.
-
-### v3.5 (Stable Beta) — 2026-05-03
-
-**Bug Fixes:**
-- Fixed `switch` single-line case + multi-line default parsing
-- Fixed string interpolation formatting (`{var:.2f}` now works correctly)
-- Fixed `null` comparison in chained expressions (`null == null`, `null < 5`, etc.)
-- Fixed closure variable assignment (functions can now modify outer variables correctly)
-- Registered `sorted()` as a built-in function
-
-**New Features:**
-- Package Manager: `vigo install`, `vigo uninstall`, `vigo list`, `vigo publish`, `vigo build`
-- Package Registry: `Beck-HM/ViGo-Registry`
-- CLI unified under `vigo/cli.py` with subcommand routing
-
-**Language Enhancements:**
-- Built-in method support: `list.push()`, `str.upper()`, `dict.keys()`, `str.split()`, etc.
-- Smart quote detection with friendly error messages (shows Unicode codepoint)
-- Unified block parser (`_parse_block`) for all control flow structures
-- `const` variables now properly protected from reassignment
+- Full release with IR, hooks, new stdlib modules
+- See RM3.md for complete v3.6 release notes
 
 ---
 
 ## Installation
 
 ### Windows Installer (Recommended)
-
-Download `ViGo_Installer.exe` from the [releases page](#). One click, done.
+Download `ViGo_Installer.exe` from the [releases page](https://github.com/Beck-HM/ViGo/releases). One click, done.
 
 The installer will:
 - Copy all files to `C:\ViGo`
@@ -96,7 +184,7 @@ vigo
 
 ```bash
 git clone https://github.com/Beck-HM/ViGo.git
-cd vigo
+cd ViGo
 python main.py
 ```
 
@@ -116,11 +204,7 @@ Run it:
 
 ```bash
 vigo hello.vigo
-```
-
-Or via Python:
-
-```bash
+# or
 python main.py hello.vigo
 ```
 
@@ -155,16 +239,6 @@ done = no               # false
 ```
 
 `true` and `false` also work.
-
-### Comments
-
-```vigo
-# single-line comment
-
-#*
-    multi-line comment
-*#
-```
 
 ### Functions
 
@@ -205,84 +279,39 @@ el ts
 Fin
 ```
 
-### Ternary expression
+### Loops
 
 ```vigo
-status = score >= 60 ? "pass" : "fail"
-```
-
-### The `skip` loop (unless)
-
-Executes the body while the condition is **false** — equivalent to `while not`:
-
-```vigo
-skip done ts
-    process()
-Fin
-```
-
-### The `go` loop (do-while)
-
-Body runs at least once; condition checked afterward:
-
-```vigo
-go ts
-    line = input("> ")
-Fin loop line != "quit"
-```
-
-### The `loop` loop (while)
-
-Standard while loop — runs while condition is true:
-
-```vigo
+# while loop
 loop count > 0 ts
     print(count)
     count -= 1
 Fin
-```
 
-### The `for` loop (for-in)
-
-```vigo
+# for-in loop
 for item in items ts
     print(item)
 Fin
 
-# With break / continue
-for x in data ts
-    if x == null ts
-        continue
-    Fin
-    if x > 100 ts
-        break
-    Fin
-    process(x)
+# unless loop (while not)
+skip done ts
+    process()
 Fin
+
+# do-while loop
+go ts
+    line = input("> ")
+Fin loop line != "quit"
 ```
 
 ### Switch with range matching
 
 ```vigo
 switch score ts
-    case 90..100 ts
-        grade = "A"
-    case 80..89 ts
-        grade = "B"
-    case 70..79 ts
-        grade = "C"
-    default ts
-        grade = "F"
-Fin
-```
-
-Single values also work:
-
-```vigo
-switch day ts
-    case "Mon" ts print("Monday") Fin
-    case "Fri" ts print("TGIF!") Fin
-    default ts print("Regular day") Fin
+    case 90..100 ts grade = "A" Fin
+    case 80..89  ts grade = "B" Fin
+    case 70..79  ts grade = "C" Fin
+    default      ts grade = "F" Fin
 Fin
 ```
 
@@ -296,20 +325,11 @@ data |> filter(ok) |> map(Fun x: x * 2 Fin) |> sum()
 
 The left side becomes the **first argument** to the function on the right.
 
-### Optional chaining `?.`
-
-Safely access nested properties — returns `null` if any link is missing:
+### Optional chaining `?.` & Null coalescing `??`
 
 ```vigo
-city = user?.address?.city
-```
-
-### Null coalescing `??`
-
-Provide fallback values for `null`:
-
-```vigo
-name = input("Name: ") ?? "Anonymous"
+city = user?.address?.city       # returns null if any link is missing
+name = input("Name: ") ?? "Anonymous"  # fallback for null
 ```
 
 ### String interpolation
@@ -318,93 +338,20 @@ name = input("Name: ") ?? "Anonymous"
 greeting = "Hello, {name}! Score: {score:.2f}"
 ```
 
-Escape braces with double braces: `"{{raw}}"` → `"{raw}"`
-
-### Multiline strings
-
-```vigo
-text = """
-    This is a
-    multiline string.
-"""
-```
-
-### List comprehension
-
-```vigo
-squares = [x * x for x in 1..10 if x % 2 == 0]
-```
-
-### Range expression `..`
-
-Creates an inclusive range:
-
-```vigo
-1..5   # [1, 2, 3, 4, 5]
-```
-
-### Spread / expand `...`
-
-```vigo
-combined = [1, 2, ...more_items, 9, 10]
-```
-
 ### Classes & Inheritance
 
 ```vigo
 class Animal ts
-    Fun as init(name):
-        this.name = name
-    Fin
-
-    Fun as speak():
-        Ret "{this.name} makes a sound"
-    Fin
+    Fun as init(name): this.name = name Fin
+    Fun as speak(): Ret "{this.name} makes a sound" Fin
 Fin
 
 class Dog extends Animal ts
-    Fun as speak():
-        Ret "{this.name} barks!"
-    Fin
+    Fun as speak(): Ret "{this.name} barks!" Fin
 Fin
 
 d = new Dog("Rex")
-print(d.speak())       # Rex barks!
-```
-
-### Static methods
-
-```vigo
-class MathUtils ts
-    static Fun as square(x):
-        Ret x * x
-    Fin
-Fin
-
-print(MathUtils.square(5))   # 25
-```
-
-### Interfaces
-
-```vigo
-interface Drawable ts
-    abstract Fun as draw()
-    abstract Fun as resize(w, h)
-Fin
-```
-
-### Enums
-
-```vigo
-enum Color ts
-    Red         # 0
-    Green       # 1
-    Blue = 5    # 5
-    Yellow      # 6 (auto-increment from previous)
-Fin
-
-print(Color.Red)    # 0
-print(Color.Blue)   # 5
+print(d.speak())  # Rex barks!
 ```
 
 ### Try / Catch / Throw
@@ -415,338 +362,86 @@ try ts
 catch err ts
     print("Caught: {err}")
 Fin
-```
 
-Throwing errors:
-
-```vigo
 throw "Something went wrong"
 ```
 
-### Assertions — `sure`
-
-```vigo
-sure age >= 0, "Age cannot be negative"
-```
-
-### Module loading
-
-```vigo
-load "utils.vigo"
-load "helpers.vigo" as h
-
-print(h.some_function())
-```
-
-### Await (async)
-
-```vigo
-await 2.5          # Pauses execution for 2.5 seconds
-```
-
-### Chained comparisons
-
-```vigo
-if 0 < x < 100 ts
-    print("x is in range")
-Fin
-```
-
-### `in` operator
-
-```vigo
-if "apple" in fruits ts
-    print("Found it")
-Fin
-
-if "admin" not in users ts
-    print("Access denied")
-Fin
-```
-
-### Lists, Dicts, Sets
-
-```vigo
-nums = [1, 2, 3, 4, 5]
-user = {"name": "Alice", "age": 30}
-tags = {"vigo", "ai", "scripting"}
-
-nums[0]         # 1
-user["name"]    # Alice
-```
-
-### Slicing
-
-```vigo
-data = [10, 20, 30, 40, 50]
-middle = data[1..3]       # [20, 30, 40] (inclusive range)
-first_half = data[0:3]    # [10, 20, 30]
-from_third = data[2:]     # [30, 40, 50]
-```
-
----
-
-## Operators (full list)
-
-| Category | Operators |
-|----------|-----------|
-| Arithmetic | `+` `-` `*` `/` `//` `%` `**` |
-| Comparison | `==` `!=` `<` `>` `<=` `>=` |
-| Logical | `and` `or` `not` `!` |
-| Bitwise | `&` `|` `^` `~` `<<` `>>` |
-| Assignment | `=` `+=` `-=` `*=` `/=` `%=` |
-| Special | `|>` `?.` `??` `..` `...` `? :` |
-| Membership | `in` `not in` |
-
-### Operator precedence (high to low)
-
-1. `?.` `..` `...`
-2. `**`
-3. `!` `-` (unary) `~` `not` `await`
-4. `*` `/` `//` `%`
-5. `+` `-`
-6. `<<` `>>`
-7. `&`
-8. `^`
-9. `|`
-10. `<` `>` `<=` `>=` `==` `!=` (chainable)
-11. `and`
-12. `or`
-13. `??`
-14. `? :`
-15. `|>`
-
----
-
-## Keywords (full list)
-
-```
-if        el        eif       ts        Fin
-Fun       as        Ret       loop      for
-in        break     continue  load      and
-or        not       null      true      false
-ok        no        class     new       extends
-this      try       catch     throw     await
-switch    case      default   enum      const
-static    abstract  interface go        skip
-sure
-```
-
----
-
-## Built-in Functions
-
-### Core
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `print` | `print(*args)` | Print to stdout |
-| `input` | `input(prompt?)` | Read line from stdin |
-| `len` | `len(x)` | Length of string / list / dict |
-| `str` | `str(x)` | Convert to string |
-| `int` | `int(x)` | Convert to integer |
-| `float` | `float(x)` | Convert to float |
-| `bool` | `bool(x)` | Convert to boolean |
-| `type` | `type(x)` | Return type name |
-
-### Math
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `abs` | `abs(x)` | Absolute value |
-| `min` | `min(*args)` | Minimum value |
-| `max` | `max(*args)` | Maximum value |
-| `floor` | `floor(x)` | Floor |
-| `ceil` | `ceil(x)` | Ceiling |
-| `round` | `round(x, digits?)` | Round |
-| `pow` | `pow(x, y)` | Power (also `x ** y`) |
-| `sqrt` | `sqrt(x)` | Square root |
-| `sin` | `sin(x)` | Sine (radians) |
-| `cos` | `cos(x)` | Cosine (radians) |
-| `tan` | `tan(x)` | Tangent (radians) |
-| `log` | `log(x, base?)` | Logarithm (default: natural) |
-| `log10` | `log10(x)` | Base-10 logarithm |
-| `degrees` | `degrees(rad)` | Radians to degrees |
-| `radians` | `radians(deg)` | Degrees to radians |
-| `clamp` | `clamp(x, lo, hi)` | Clamp value to range |
-| `lerp` | `lerp(a, b, t)` | Linear interpolation |
-| `random` | `random()` | Random float 0–1 |
-| `random` | `random(max)` | Random int 0–max |
-| `random` | `random(min, max)` | Random int min–max |
-| `random_float` | `random_float(a, b)` | Random float a–b |
-| `random_choice` | `random_choice(arr)` | Random element |
-| `random_shuffle` | `random_shuffle(arr)` | Shuffle in-place |
-
-### Constants
-
-| Constant | Value |
-|----------|-------|
-| `PI` | 3.141592653589793 |
-| `E` | 2.718281828459045 |
-| `TAU` | 6.283185307179586 |
-
-### String Operations
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `upper` | `str.upper()` | Uppercase |
-| `lower` | `str.lower()` | Lowercase |
-| `trim` | `str.trim()` | Strip whitespace |
-| `split` | `str.split(delimiter)` | Split into list |
-| `join` | `str.join(list)` | Join list with separator |
-| `replace` | `str.replace(old, new)` | Replace substrings |
-
-### Collection Operations
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `push` | `list.push(item)` | Append to list |
-| `pop` | `list.pop()` | Remove and return last |
-| `reverse` | `list.reverse()` | Reverse in-place |
-| `sort` | `sorted(list)` | Return sorted copy |
-| `keys` | `dict.keys()` | Dictionary keys |
-| `values` | `dict.values()` | Dictionary values |
-| `sum` | `sum(list)` | Sum of elements |
-
-### File I/O
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `read_file` | `read_file(path)` | Read entire file |
-| `write_file` | `write_file(path, content)` | Write file |
-| `append_file` | `append_file(path, content)` | Append to file |
-| `read_lines` | `read_lines(path)` | Read as list of lines |
-| `file_exists` | `file_exists(path)` | Check file existence |
-
-### Path Operations
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `path_join` | `path_join(*parts)` | Join path components |
-| `path_dir` | `path_dir(path)` | Directory name |
-| `path_base` | `path_base(path)` | Base file name |
-| `path_ext` | `path_ext(path)` | File extension |
-| `path_stem` | `path_stem(path)` | File name without extension |
-| `path_abs` | `path_abs(path)` | Absolute path |
-| `path_exists` | `path_exists(path)` | Path existence |
-| `path_isdir` | `path_isdir(path)` | Is directory |
-| `path_isfile` | `path_isfile(path)` | Is file |
-
-### Crypto
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `md5` | `md5(s)` | MD5 hex digest |
-| `sha256` | `sha256(s)` | SHA-256 hex digest |
-| `sha512` | `sha512(s)` | SHA-512 hex digest |
-| `base64_encode` | `base64_encode(data)` | Base64 encode |
-| `base64_decode` | `base64_decode(data)` | Base64 decode |
-
-### JSON
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `to_json` | `to_json(obj)` | Serialize to JSON |
-| `parse_json` | `parse_json(s)` | Parse JSON string |
-
----
-
-## AI Functions
-
-### API Configuration
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `ai_set_key` | `ai_set_key(key)` | Set API key |
-| `ai_set_base_url` | `ai_set_base_url(url)` | Set base URL |
-
-### Core AI Calls
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `ai_ask` | `ai_ask(prompt, model?, temp?, max_tokens?)` | Single AI request |
-| `ai_chat` | `ai_chat(messages, model?, temp?, max_tokens?)` | Multi-turn chat |
-| `ai_ollama` | `ai_ollama(prompt, model?, host?)` | Local Ollama call |
-| `ai_chain` | `ai_chain(steps, default_model?)` | Chained prompt pipeline |
-| `ai_compare` | `ai_compare(prompt, models)` | Compare models on same prompt |
-| `ai_debate` | `ai_debate(question, models, rounds?)` | Multi-agent debate |
-
-### Agent Framework
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `ai_agent` | `ai_agent(model?, max_steps?, verbose?)` | Create an agent |
-| `ai_agent_add_tool` | `ai_agent_add_tool(agent, name, func, desc)` | Register a tool |
-| `ai_agent_run` | `ai_agent_run(agent, task)` | Run agent with task |
-
-Built-in agent tools: `web_search`, `run_code`, `read_file`, `write_file`, `list_files`, `db_query`.
-
-### Safety & Cache
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `ai_enable_cache` | `ai_enable_cache(enabled?)` | Toggle response caching |
-| `ai_clear_cache` | `ai_clear_cache()` | Clear all cached responses |
-| `ai_enable_guardrails` | `ai_enable_guardrails(enabled?)` | Toggle safety filtering |
-| `ai_set_blocked_words` | `ai_set_blocked_words(words)` | Set blocked word list |
-| `ai_stats` | `ai_stats()` | Get token/call statistics |
-
-### Multimodal
-
-| Function | Signature | Description |
-|----------|-----------|-------------|
-| `ai_describe_image` | `ai_describe_image(path, model?, host?)` | Describe image via llava |
-
----
-
-## Transpiler (ViGo → Python)
-
-Any ViGo source can be transpiled to native Python:
-
-```bash
-vigo build script.vigo     # produces script.py
-```
-
-Or programmatically:
-
-```python
-from vigo.transpiler.transpiler import transpile
-
-python_code = transpile(vigo_source)
-```
-
-The transpiled output includes all necessary imports and helper functions, and runs at
-native Python speed with zero ViGo overhead.
+### Many more features...
+List comprehension, regex literals, enums, interfaces, static methods, chained comparisons, spread operator, slicing, range expressions, module loading, assertions, and more.
 
 ---
 
 ## Execution Modes
 
-| Mode | Description |
-|------|-------------|
-| Tree-walk interpreter | Full step-through, breakpoints, variable inspection |
-| Cython-compiled | Pre-compiled modules for speed |
-| Python transpiler | ViGo → Python, runs at native speed |
+| Mode | Description | Speed |
+|------|-------------|-------|
+| Tree-walk interpreter | Full step-through, breakpoints, variable inspection, hooks | Baseline |
+| Bytecode VM | Stack-based virtual machine | ~1x |
+| **Python transpiler** | ViGo → Python, runs at native speed | **10–30x** |
+| IR optimized | Constant folding, dead code elimination, builtin inlining | — |
 
 ---
 
-## Standard Library Modules (25)
+## AI Functions (partial list)
+
+### Core
+`ai_ask` · `ai_chat` · `ai_ollama` · `ai_chain` · `ai_compare` · `ai_debate`
+
+### Agent
+`ai_agent` · `ai_agent_add_tool` · `ai_agent_run`
+
+### Embedding
+`ai_embed` · `ai_embed_batch`
+
+### Function Calling
+`ai_ask_with_tools` · `ai_register_function` · `ai_execute_tool_call`
+
+### Vision & Multimodal
+`ai_vision` · `ai_ask_multimodal` · `ai_describe_image`
+
+### Structured Output
+`ai_ask_json` · `ai_extract`
+
+### Batch & Stream
+`ai_batch` · `ai_batch_async` · `ai_stream`
+
+### Search
+`ai_web_search` · `ai_web_search_ask` · `ai_news_search`
+
+### RAG
+`ai_rag_ask` · `ai_rag_chat` · `ai_create_knowledge_base`
+
+### Evaluation
+`ai_evaluate` · `ai_fine_tune` · `ai_fine_tune_status`
+
+### Token & Cost
+`ai_count_tokens` · `ai_token_cost`
+
+### Chart
+`ai_generate_chart`
+
+### Cache & Safety
+`ai_enable_cache` · `ai_enable_semantic_cache` · `ai_enable_guardrails` · `ai_set_blocked_words`
+
+---
+
+## Standard Library Modules (41 total)
 
 | Module | Purpose |
 |--------|---------|
+| `ai` | AI multi-provider, agents, embeddings, RAG, vision, function calling |
 | `math` | Math, trig, random, constants (PI, E, TAU) |
-| `io` | File I/O, path operations, print, input |
+| `io` | File I/O, path operations |
 | `crypto` | MD5, SHA-256, SHA-512, Base64 |
-| `net` | HTTP requests, downloads |
-| `data` | JSON, CSV, Base64 encode/decode |
-| `sys` | OS info, environment variables, sleep, shell exec |
-| `db` | SQLite database operations |
+| `net` | HTTP, TCP, UDP, DNS, URL parsing |
+| `data` | JSON, CSV, map, filter, reduce |
+| `sys` | OS info, environment variables, process management |
+| `db` | SQLite, MySQL, PostgreSQL, Redis |
 | `log` | Structured logging with levels |
 | `color` | Terminal ANSI colors |
 | `ini` | INI config file parsing |
-| `gui` | Simple GUI dialogs (tkinter) |
-| `ai` | Single calls, chat, chain, agents, RAG, image gen, debates |
-| `rag` | RAG retrieval (PDF, DOCX, HTML), ChromaDB vector DB |
+| `gui` | GUI dialogs (tkinter) |
+| `rag` | RAG retrieval (PDF, DOCX, HTML), ChromaDB |
 | `image` | Stable Diffusion image generation |
 | `prompt` | Prompt templates with auto-optimization |
 | `email` | SMTP email sending |
@@ -759,6 +454,21 @@ native Python speed with zero ViGo overhead.
 | `cron` | Cron-style scheduling |
 | `ws` | WebSocket client/server |
 | `train` | Model training utilities |
+| `mem` | Long-term memory (ChromaDB + AI facts) |
+| `sci` | Scientific computing (29 functions) |
+| `fmt` | Data formats (YAML, TOML, XML, CSV, INI) |
+| `sec` | Security & cryptography (AES, JWT, bcrypt) |
+| `multi` | Multimedia (images, audio, video) |
+| `cloud` | Cloud storage (S3) |
+| `vis` | Data visualization (matplotlib) |
+| `concurrent` | Concurrency (Lock, Semaphore, TaskPool, Queue) |
+| `cache` | Semantic caching |
+| `stream` | Stream processing |
+| `prof` | Performance profiling |
+| `pipeline` | ETL data pipelines |
+| `pack` | Binary serialization (MessagePack, CBOR, BSON) |
+| `watch` | File system watcher |
+| `sandbox` | Sandboxed code execution |
 
 ---
 
@@ -779,41 +489,50 @@ ViGo/
 ├── main.py                # Entry point
 ├── setup.py               # Package setup
 ├── installer.py           # Windows EXE installer
-└── vigo/
-    ├── lexer/             # Tokenizer (tokens.py, lexer.py)
-    ├── parser/            # Parser (ast_nodes.py, parser.py)
-    ├── runtime/           # Interpreter (environment, objects, builtins, errors, interpreter)
-    ├── stdlib/            # 25 standard library modules
-    ├── bytecode/          # Bytecode compiler & VM
-    └── transpiler/        # ViGo → Python transpiler
+├── vigo/
+│   ├── lexer/             # Tokenizer (tokens.py, lexer.py)
+│   ├── parser/            # Parser (ast_nodes.py, parser.py)
+│   ├── runtime/           # Interpreter (environment, objects, builtins, errors, interpreter, ir)
+│   ├── stdlib/            # 41 standard library modules
+│   ├── bytecode/          # Bytecode compiler & VM
+│   └── transpiler/        # ViGo → Python transpiler
+├── embedded/              # C embedding API
+│   ├── include/vigo.h     # Public C API header
+│   ├── src/               # 7 C source files
+│   └── tests/             # 32 C test cases
+└── tests/                 # ViGo regression tests (99/99)
 ```
 
 ---
 
 ## Why ViGo?
 
-- **Built for AI:** First-class AI primitives — agents, RAG, debates, guardrails
+- **Built for AI:** First-class AI primitives — 85+ functions, 20 providers, agents, RAG, embeddings, vision
 - **Readable:** `ts`/`Fin` blocks are visually clean; no bracket hunting
 - **Pipeline-native:** `|>` makes data transformation chains obvious
 - **Safe by default:** `?.` and `??` eliminate null reference crashes
-- **Fast when needed:** Transpile to Python for native performance
-- **Compact:** 25 stdlib modules, 35 AI capabilities, all in ~950 KB
+- **Sandbox-ready:** Process isolation, resource limits, restricted builtins
+- **Fast when needed:** Transpile to Python for native performance (10–30x)
+- **Embeddable:** C API for integrating ViGo AI into any C/C++ application
+- **Compact:** 41 stdlib modules, 85+ AI capabilities, all in ~950 KB
+- **Zero external dependencies:** Everything runs on Python stdlib; optional deps for advanced features
 
 ---
 
 ## Status
 
-**Version:** v3.6
-**Tests:** 55/55 regression tests passing
+**Version:** v3.8 Stable Beta  
+**Tests:** 99/99 ViGo regression · 32/32 Embedded C · 14/14 Extended Stdlib  
 **Platform:** Windows (primary), Linux/macOS (via Python source)
 
-### Known limitations
+### Known Limitations
 
-- Single-line `if` / `for` / `switch` / `try-catch` blocks have parser edge cases with
-  `Fin` consumption. Multi-line forms are fully stable (all 55 tests pass).
-- Bytecode VM supports basic operations, variables, conditionals, loops, and functions,
-  but does not support classes or pipes in bytecode mode.
-- Cython `.pyd` files use pure `.py` fallback to avoid stale bytecode issues.
+- **Bytecode VM**: Classes and pipe operations not fully supported in bytecode mode
+- **ViGo function callbacks**: Custom `Fun` functions cannot be called from Python threads (affects `TaskPool.map`, `stream.filter/map`, `Pipeline`, `profile`/`benchmark`)
+- **Closure writes in threads**: ViGo closure variables are read-only in Python sub-threads
+- **Switch edge cases**: Single-line `switch` with nested blocks may have parser edge cases
+- **Nested list literals**: `[[1, 2], [3, 4]]` requires splitting across variables
+- **Named parameters**: Not supported; use positional arguments
 
 ---
 
@@ -825,6 +544,8 @@ ViGo is under active development. Contributions are welcome:
 2. Create a feature branch
 3. Add passing tests for any changes
 4. Submit a pull request
-```
 
 ---
+
+**The AI Scripting Language.**
+```

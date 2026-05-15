@@ -242,13 +242,22 @@ class PythonTranspiler:
                 return f"sum(list({self._transpile_expr(node.args[0])}))"
             if name in self.BUILTIN_RENAME:
                 name = self.BUILTIN_RENAME[name]
+            args = ", ".join(self._transpile_expr(a) for a in node.args)
+            return f"{name}({args})"
         elif isinstance(node.name, DotAccess):
             obj = self._transpile_expr(node.name.object)
-            name = f"{obj}.{node.name.attr}"
+            attr = node.name.attr
+            # Map ViGo method names to Python method names
+            if attr in self.BUILTIN_RENAME:
+                mapped = self.BUILTIN_RENAME[attr]
+                if mapped.startswith('.'):
+                    attr = mapped[1:]
+            args = ", ".join(self._transpile_expr(a) for a in node.args)
+            return f"{obj}.{attr}({args})"
         else:
             name = self._transpile_expr(node.name)
-        args = ", ".join(self._transpile_expr(a) for a in node.args)
-        return f"{name}({args})"
+            args = ", ".join(self._transpile_expr(a) for a in node.args)
+            return f"{name}({args})"
 
     def _transpile_pipe(self, node):
         if isinstance(node.right, PipeExpr):
@@ -264,7 +273,8 @@ class PythonTranspiler:
                 call = node.right
                 fn_name_raw = call.name.name if isinstance(call.name, Variable) else self._transpile_expr(call.name)
                 fn_args = [self._transpile_expr(a) for a in call.args]
-                args = fn_args + [left]
+                # Fix: left side becomes the FIRST argument, not the last
+                args = [left] + fn_args
                 if fn_name_raw == 'sum':
                     return f"sum(list({', '.join(args)}))"
                 return f"{fn_name_raw}({', '.join(args)})"
@@ -320,10 +330,56 @@ class PythonTranspiler:
         code = []
         code.append(self._emit(f"def {node.name}({', '.join(params)}):"))
         self.indent += 1
-        for s in node.body:
-            code.append(self._transpile_statement(s))
+
+        # Tail-call optimization: convert tail-recursive functions to while loops.
+        # Detect pattern: body ends with "return func(args...)" where func == node.name.
+        if self._is_tail_recursive(node):
+            code.append(self._emit("while True:"))
+            self.indent += 1
+            for s in node.body[:-1]:  # All statements except the last return
+                code.append(self._transpile_statement(s))
+            # Convert the tail return into parameter rebinding + continue
+            ret_stmt = node.body[-1]
+            if isinstance(ret_stmt, ReturnStmt) and isinstance(ret_stmt.value, FuncCall):
+                call = ret_stmt.value
+                # Use temp variables to avoid overwrite issues
+                temp_names = []
+                for i, p in enumerate(node.params):
+                    arg_expr = self._transpile_expr(call.args[i]) if i < len(call.args) else self._transpile_expr(node.defaults.get(p, 'None'))
+                    temp = f"__tco_{i}__"
+                    code.append(self._emit(f"{temp} = {arg_expr}"))
+                    temp_names.append(temp)
+                for i, p in enumerate(node.params):
+                    code.append(self._emit(f"{p} = {temp_names[i]}"))
+                if node.rest_param and len(call.args) > len(node.params):
+                    rest_args = call.args[len(node.params):]
+                    rest_str = ", ".join(self._transpile_expr(a) for a in rest_args)
+                    code.append(self._emit(f"{node.rest_param} = [{rest_str}]"))
+                elif node.rest_param:
+                    code.append(self._emit(f"{node.rest_param} = []"))
+                code.append(self._emit("continue"))
+            self.indent -= 1
+            # Base case: the non-tail return (if any) is in the body statements already
+        else:
+            for s in node.body:
+                code.append(self._transpile_statement(s))
+
         self.indent -= 1
         return "\n".join(code)
+
+    def _is_tail_recursive(self, node):
+        """Check if the function body ends with a tail call to itself."""
+        if not node.body:
+            return False
+        last = node.body[-1]
+        if not isinstance(last, ReturnStmt):
+            return False
+        if not isinstance(last.value, FuncCall):
+            return False
+        call = last.value
+        if not isinstance(call.name, Variable):
+            return False
+        return call.name.name == node.name
 
     def _transpile_method(self, node):
         params = ["self"] + list(node.params)
@@ -428,9 +484,12 @@ def _sha256(s): return hashlib.sha256(s.encode()).hexdigest()
 def _sha512(s): return hashlib.sha512(s.encode()).hexdigest()
 """
     ai_helpers = """
-import urllib.request, urllib.error, json as _json
-_ai_api_key = None
-_ai_base_url = None
+import urllib.request, urllib.error, json as _json, os as _os
+_ai_api_key = _os.environ.get("VIGO_AI_API_KEY", None)
+_ai_base_url = _os.environ.get("VIGO_AI_BASE_URL", None)
+_ai_default_model = _os.environ.get("VIGO_AI_MODEL", "llama3")
+_ai_default_provider = _os.environ.get("VIGO_AI_PROVIDER", "ollama")
+_ollama_host = _os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 
 def _ai_set_key_wrapper(key):
     global _ai_api_key
@@ -442,38 +501,41 @@ def _ai_set_base_url_wrapper(url):
     _ai_base_url = url
     return True
 
-def _ai_ollama_wrapper(prompt, model="llama3", host="http://localhost:11434"):
-    url = host + "/api/generate"
-    data = _json.dumps({"model": model, "prompt": str(prompt), "stream": False}).encode()
+def _ai_ollama_wrapper(prompt, model=None, host=None):
+    m = model or _ai_default_model
+    h = host or _ollama_host
+    url = h + "/api/generate"
+    data = _json.dumps({"model": m, "prompt": str(prompt), "stream": False}).encode()
     req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=300) as resp:
         return _json.loads(resp.read().decode()).get("response", "")
 
-def _ai_chain_wrapper(steps, default_model="gemma-4b"):
+def _ai_chain_wrapper(steps, default_model=None):
+    dm = default_model or _ai_default_model
     result = ""
     for step in steps:
         prompt_template = step[0]
-        model = step[1] if len(step) > 1 else default_model
+        model = step[1] if len(step) > 1 else dm
         prompt = prompt_template.replace("__OUTPUT__", result)
         result = _ai_ollama_wrapper(prompt, model)
     return result
 
 def _ai_ask_wrapper(prompt, model=None, temp=None, max_tokens=None):
-    return _ai_ollama_wrapper(prompt, model or "gemma-4b")
+    return _ai_ollama_wrapper(prompt, model or _ai_default_model)
 
 def _ai_chat_wrapper(messages, model=None, temp=None, max_tokens=None):
     prompt = "\\n".join(str(m[1]) for m in messages if isinstance(m, list) and len(m) >= 2)
-    return _ai_ollama_wrapper(prompt, model or "gemma-4b")
+    return _ai_ollama_wrapper(prompt, model or _ai_default_model)
 
 class _AIAgent:
-    def __init__(self, model="gemma-4b", max_steps=5, verbose=False):
-        self.model = model
-        self.max_steps = max_steps
+    def __init__(self, model=None, max_steps=None, verbose=False):
+        self.model = model or _ai_default_model
+        self.max_steps = max_steps or int(_os.environ.get("VIGO_AGENT_MAX_STEPS", "5"))
         self.verbose = verbose
         self.tools = {}
         self.memory = []
         self.long_term_memory = []
-        self.retry_count = 2
+        self.retry_count = int(_os.environ.get("VIGO_AGENT_RETRIES", "2"))
 
     def add_tool(self, name, func, desc):
         self.tools[name] = {"func": func, "desc": desc}
@@ -506,7 +568,7 @@ class _AIAgent:
             current_prompt = f"{current_prompt}\\n\\nAssistant: {response}\\n\\nContinue or provide FINAL answer."
         return "Agent max steps reached."
 
-def _ai_agent_wrapper(model="gemma-4b", max_steps=5, verbose=False):
+def _ai_agent_wrapper(model=None, max_steps=None, verbose=False):
     return _AIAgent(model, max_steps, verbose)
 
 def _ai_agent_add_tool_wrapper(agent, name, func, desc):
